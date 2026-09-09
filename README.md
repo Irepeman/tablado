@@ -19,13 +19,26 @@ npm run dev
 
 Abre http://localhost:3000
 
-La clave se saca en https://console.anthropic.com/settings/keys — empieza por
-`sk-ant-`. Vive solo en `.env.local`, que está en `.gitignore`: nunca se sube al
-repositorio ni llega al navegador.
+La clave es **opcional** (ver abajo). Si la quieres, se saca en
+https://console.anthropic.com/settings/keys y se paga por uso, aparte de
+cualquier suscripción. Vive solo en `.env.local`, que está en `.gitignore`:
+nunca se sube al repositorio ni llega al navegador.
 
-**Sin clave la app funciona igual**, solo que las peticiones abiertas contestan
-que el copiloto no está configurado. Todo lo demás — el editor, el despiece, el
-precio y el motor de intención local — no depende del modelo.
+### Dos modos, los dos válidos
+
+**Sin clave (gratis).** Es un modo de producto, no una app rota. Funciona el
+configurador entero: el 3D, arrastrar las piezas, el motor de intención local,
+la verificación de fabricación, el despiece, el plan de corte y el precio.
+Cuando el motor local no entiende algo, contesta explicando lo que sí sabe
+hacer. El coste de servir un diseño es cero.
+
+**Con clave.** Se suma la capa 2: las peticiones abiertas suben al modelo. El
+cliente detecta si este despliegue tiene copiloto en la primera petición no
+resuelta y, si no lo tiene, deja de preguntar al servidor durante el resto de la
+sesión — sin viajes de red inútiles.
+
+Añadir la clave más adelante no requiere tocar código: es una variable de
+entorno y un redespliegue.
 
 ---
 
@@ -34,9 +47,11 @@ precio y el motor de intención local — no depende del modelo.
 ```bash
 npm i -g vercel
 vercel
-vercel env add ANTHROPIC_API_KEY production
 vercel --prod
 ```
+
+`ANTHROPIC_API_KEY` es opcional. Para añadirla cuando quieras:
+`vercel env add ANTHROPIC_API_KEY production` y redesplegar.
 
 También puedes importar el repositorio desde vercel.com y añadir
 `ANTHROPIC_API_KEY` en *Settings → Environment Variables*.

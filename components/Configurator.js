@@ -20,9 +20,16 @@ import {
 import { parseIntent } from "@/lib/intent";
 import { mm } from "@/lib/pricing";
 
+/* Lo que el motor local sabe hacer. Se dice cuando no entiende algo:
+   una lista de lo posible enseña más que un "no te he entendido". */
+const NO_ENTIENDO =
+  "No he pillado ese cambio. Puedo con medidas («ancho 2,10 m», «que quepa en un hueco " +
+  "de 1,80», «1,80 × 2,20»), acabado, columnas, baldas, cajones, puertas, base y trasera " +
+  "— o dime para qué la quieres: vinilos, libros, zapatos, archivadores, la tele.";
+
 const INTRO = [
   { role: "ai", text: "Estantería de 2,40 × 2,00 m en roble, cuatro columnas. Dime qué cambiar: medidas, material, columnas, baldas, cajones, puertas — o para qué la quieres («para vinilos», «para libros»). También puedes arrastrar las baldas y los divisores directamente sobre la pieza." },
-  { role: "sys", text: "Las ediciones directas se resuelven en tu navegador, al instante. Solo las peticiones abiertas llegan al copiloto." },
+  { role: "sys", text: "El motor de diseño corre en tu dispositivo: sin cuenta, sin espera y sin coste. Escribe como hablarías con un carpintero." },
 ];
 
 function diffChips(a, b) {
@@ -57,6 +64,9 @@ export default function Configurator() {
   const [tab, setTab] = useState("spec");
 
   const history = useRef([]);
+  /* null = sin comprobar · false = este despliegue no tiene copiloto.
+     En cuanto se sabe, se deja de gastar un viaje al servidor. */
+  const copilot = useRef(null);
   const vp = useRef(null);
   const toastT = useRef(null);
 
@@ -121,6 +131,8 @@ export default function Configurator() {
       return;
     }
 
+    if (copilot.current === false) { say({ role: "ai", text: NO_ENTIENDO }); return; }
+
     setBusy(true);
     say({ role: "ai", text: "Pensando…", pending: true });
     try {
@@ -131,10 +143,16 @@ export default function Configurator() {
       });
       const data = await r.json();
       setMessages((xs) => xs.filter((m) => !m.pending));
-      if (!r.ok || !data.params) {
-        say({ role: "sys", text: data.reply || "El copiloto no ha podido responder." });
+      if (data.error === "sin_clave") {
+        copilot.current = false;
+        say({ role: "ai", text: NO_ENTIENDO });
         return;
       }
+      if (!r.ok || !data.params) {
+        say({ role: "ai", text: data.reply || NO_ENTIENDO });
+        return;
+      }
+      copilot.current = true;
       const after = normalize(data.params);
       history.current.push(before);
       setParams(after);
@@ -142,7 +160,7 @@ export default function Configurator() {
       say({ role: "ai", text: data.reply || "Hecho.", chips: diffChips(before, after), src: "server" });
     } catch {
       setMessages((xs) => xs.filter((m) => !m.pending));
-      say({ role: "sys", text: "No he podido contactar con el servidor. El editor sigue funcionando." });
+      say({ role: "ai", text: NO_ENTIENDO });
     } finally {
       setBusy(false);
     }

@@ -91,10 +91,13 @@ ${JSON.stringify(p)}`;
 }
 
 export async function POST(req) {
+  /* Sin clave la app NO está rota: el motor local cubre el diseño entero.
+     Se responde con un mensaje de cliente, nunca con instrucciones de
+     configuración, y con un código que el cliente usa para dejar de
+     preguntar al servidor durante el resto de la sesión. */
   if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json(
-      { error: "sin_clave", reply: "El copiloto no está configurado en este servidor. Copia .env.example a .env.local y pon tu ANTHROPIC_API_KEY." },
-      { status: 503 });
+    console.warn("[tablado] sin ANTHROPIC_API_KEY: solo motor local");
+    return Response.json({ error: "sin_clave", reply: null }, { status: 200 });
   }
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
