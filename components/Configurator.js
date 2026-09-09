@@ -62,6 +62,8 @@ export default function Configurator() {
   const [toast, setToast] = useState("");
   const [selBox, setSelBox] = useState(null);
   const [tab, setTab] = useState("spec");
+  /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
+  const [copilotOn, setCopilotOn] = useState(null);
 
   const history = useRef([]);
   /* null = sin comprobar · false = este despliegue no tiene copiloto.
@@ -145,6 +147,7 @@ export default function Configurator() {
       setMessages((xs) => xs.filter((m) => !m.pending));
       if (data.error === "sin_clave") {
         copilot.current = false;
+        setCopilotOn(false);
         say({ role: "ai", text: NO_ENTIENDO });
         return;
       }
@@ -153,6 +156,7 @@ export default function Configurator() {
         return;
       }
       copilot.current = true;
+      setCopilotOn(true);
       const after = normalize(data.params);
       history.current.push(before);
       setParams(after);
@@ -273,7 +277,11 @@ export default function Configurator() {
       <header className="bar">
         <div className="brand"><b>Tablado</b><span>Estantería a medida</span></div>
         <div className="bar-sep" />
-        <div className="bar-note">Copiloto <b>en tu servidor</b></div>
+        <div className="bar-note">
+          {copilotOn
+            ? <>Copiloto <b>en tu servidor</b></>
+            : <>Motor de diseño <b>en el dispositivo</b></>}
+        </div>
         <div className="bar-right">
           <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>Escala 1,70 m</button>
           <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>Despiece</button>
