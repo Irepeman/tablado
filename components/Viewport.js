@@ -12,37 +12,9 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
 import { MATERIALS, DRAWER_H, build, clamp, deepCopy } from "@/lib/model";
+import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
-
-function makeGrain(hex, cache) {
-  if (cache[hex]) return cache[hex];
-  const c = document.createElement("canvas");
-  c.width = 512; c.height = 512;
-  const g = c.getContext("2d");
-  const col = new THREE.Color(hex);
-  g.fillStyle = `rgb(${(col.r * 255) | 0},${(col.g * 255) | 0},${(col.b * 255) | 0})`;
-  g.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 190; i++) {
-    const y = Math.random() * 512, w = 0.4 + Math.random() * 2.4, a = 0.03 + Math.random() * 0.12;
-    g.strokeStyle = Math.random() > 0.35 ? `rgba(0,0,0,${a})` : `rgba(255,245,225,${a * 0.85})`;
-    g.lineWidth = w;
-    g.beginPath(); g.moveTo(0, y);
-    for (let x = 0; x <= 512; x += 16) {
-      g.lineTo(x, y + Math.sin(x * 0.021 + i) * 3.4 + Math.sin(x * 0.006 + i * 2) * 7);
-    }
-    g.stroke();
-  }
-  for (let i = 0; i < 2600; i++) {
-    g.fillStyle = `rgba(0,0,0,${Math.random() * 0.035})`;
-    g.fillRect(Math.random() * 512, Math.random() * 512, 1, 1);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  cache[hex] = t;
-  return t;
-}
 
 function makeEnv(renderer) {
   const c = document.createElement("canvas");
@@ -81,8 +53,12 @@ const Viewport = forwardRef(function Viewport(
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.02;
+    /* Neutral (Khronos PBR Neutral) en lugar de ACES: ACES aclara y
+       desatura los tonos medios y el roble salía color crema. Aquí el
+       cliente compra por el color, así que el render tiene que ser fiel
+       a la ficha de material. */
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = 0.95;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -92,7 +68,7 @@ const Viewport = forwardRef(function Viewport(
     scene.add(root);
     scene.environment = makeEnv(renderer);
 
-    const key = new THREE.DirectionalLight(0xfff6e8, 1.5);
+    const key = new THREE.DirectionalLight(0xfff6e8, 1.25);
     key.position.set(2.6, 4.2, 3.2);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -173,7 +149,7 @@ const Viewport = forwardRef(function Viewport(
       scene.background = col;
       floor.material.color.set(dark ? 0x24281f : 0xcfcabc);
       wall.material.color.set(dark ? 0x2b3027 : 0xe3dfd4);
-      renderer.toneMappingExposure = dark ? 0.82 : 1.02;
+      renderer.toneMappingExposure = dark ? 0.8 : 0.95;
     };
     syncTheme();
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -429,25 +405,44 @@ const Viewport = forwardRef(function Viewport(
     if (!st) return;
     const p = params;
 
-    st.meshes.forEach((m) => st.root.remove(m));
+    /* cada pieza tiene ahora su propia geometría a tamaño real: se libera */
+    st.meshes.forEach((m) => { st.root.remove(m); m.geometry.dispose(); });
     st.meshes = [];
     const geo = build(p);
     st.geo = geo;
 
-    const panelMat = (sel) => {
+    const R = st.renderer;
+    const M = MATERIALS[p.material];
+    const wood = isWood(p.material);
+
+    const faceMat = (sel) => {
       const ck = p.material + (sel ? "_s" : "");
       if (st.mats[ck]) return st.mats[ck];
-      const M = MATERIALS[p.material];
-      const map = sel || !M.grain ? null : makeGrain(M.hex, st.grain);
-      const m = new THREE.MeshStandardMaterial({
-        // la textura de veta YA lleva el color base: multiplicarlo otra vez
-        // por `color` oscurecería el acabado al cuadrado
-        color: sel ? 0xc97a3c : (map ? 0xffffff : M.hex),
-        roughness: M.rough, metalness: 0.02, map,
-      });
-      if (sel) { m.emissive = new THREE.Color(0x8a3f12); m.emissiveIntensity = 0.22; }
+      let m;
+      if (sel) {
+        m = new THREE.MeshStandardMaterial({
+          color: 0xc97a3c, roughness: 0.5, metalness: 0,
+          emissive: new THREE.Color(0x8a3f12), emissiveIntensity: 0.22 });
+      } else if (wood) {
+        const sheet = woodSheet(p.material, R);
+        m = new THREE.MeshStandardMaterial({
+          map: sheet.map, bumpMap: sheet.bump, bumpScale: 1.0,
+          roughness: M.rough, metalness: 0 });
+      } else {
+        m = new THREE.MeshStandardMaterial({ color: M.hex, roughness: M.rough, metalness: 0 });
+      }
       st.mats[ck] = m;
       return m;
+    };
+    /* canto: chapas cruzadas en el contrachapado; canto chapado en el resto */
+    const edgeMat = (sel) => {
+      if (sel || p.material !== "abedul") return faceMat(sel);
+      const ck = "ply_" + p.thickness;
+      if (!st.mats[ck]) {
+        st.mats[ck] = new THREE.MeshStandardMaterial({
+          map: plyEdge(p.thickness, R), roughness: 0.72, metalness: 0 });
+      }
+      return st.mats[ck];
     };
 
     geo.parts.forEach((part) => {
@@ -457,8 +452,8 @@ const Viewport = forwardRef(function Viewport(
         (selection.k === "shelf" && part.grp === "balda" &&
          part.col === selection.col && part.shelf === selection.shelf) ||
         (selection.k === "div" && part.grp === "divisor" && part.div === selection.div));
-      const m = new THREE.Mesh(st.box, isBack ? st.backMat : panelMat(isSel));
-      m.scale.set(part.size[0] / 1000, part.size[1] / 1000, part.size[2] / 1000);
+      const g = panelGeometry(part.size, part.id, !isBack && p.material === "abedul");
+      const m = new THREE.Mesh(g, isBack ? st.backMat : [faceMat(isSel), edgeMat(isSel)]);
       let [px, py, pz] = part.pos;
       if (exploded) {
         if (part.grp === "frente") pz += 260;

@@ -1,5 +1,6 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { woodSwatchURL } from "./wood";
 import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, DRAWER_H,
   maxSpan, validate, addColumn, redistribute, setShelfCount, deepCopy, build,
@@ -24,6 +25,13 @@ export default function SpecRail({
 }) {
   const p = params;
   const t = p.thickness;
+
+  /* las fichas enseñan la misma madera que el 3D, no un degradado */
+  const [swatch, setSwatch] = useState({});
+  useEffect(() => {
+    setSwatch({ roble: woodSwatchURL("roble"), nogal: woodSwatchURL("nogal"),
+                abedul: woodSwatchURL("abedul") });
+  }, []);
 
   const { geo, rows, nested, q, flags, span } = useMemo(() => {
     const geo = build(p);
@@ -77,10 +85,9 @@ export default function SpecRail({
                 <button className="sw" key={k} aria-pressed={p.material === k}
                         onClick={() => edit((n) => { n.material = k; })}>
                   <div className="pat" style={{
-                    background: hex,
-                    backgroundImage: M.grain
-                      ? "repeating-linear-gradient(92deg,rgba(0,0,0,.11) 0 1px,transparent 1px 4px,rgba(255,240,215,.13) 4px 5px,transparent 5px 9px)"
-                      : undefined,
+                    backgroundColor: hex,
+                    backgroundImage: swatch[k] ? `url(${swatch[k]})` : undefined,
+                    backgroundSize: "cover",
                   }} />
                   <small>{M.short}</small>
                 </button>
