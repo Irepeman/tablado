@@ -17,15 +17,8 @@ import {
   DEFAULT, MATERIALS, DRAWER_H, normalize, build, validate,
   maxSpan, deepCopy, clamp,
 } from "@/lib/model";
-import { parseIntent } from "@/lib/intent";
+import { parseIntent, fallback } from "@/lib/intent";
 import { mm } from "@/lib/pricing";
-
-/* Lo que el motor local sabe hacer. Se dice cuando no entiende algo:
-   una lista de lo posible enseña más que un "no te he entendido". */
-const NO_ENTIENDO =
-  "No he pillado ese cambio. Puedo con medidas («ancho 2,10 m», «que quepa en un hueco " +
-  "de 1,80», «1,80 × 2,20»), acabado, columnas, baldas, cajones, puertas, base y trasera " +
-  "— o dime para qué la quieres: vinilos, libros, zapatos, archivadores, la tele.";
 
 const INTRO = [
   { role: "ai", text: "Estantería de 2,40 × 2,00 m en roble, cuatro columnas. Dime qué cambiar: medidas, material, columnas, baldas, cajones, puertas — o para qué la quieres («para vinilos», «para libros»). También puedes arrastrar las baldas y los divisores directamente sobre la pieza." },
@@ -117,12 +110,29 @@ export default function Configurator() {
   /* ---------------- chat: capa local, luego servidor ---------------- */
   const send = useCallback(async (msg) => {
     if (busy) return;
+    const fb = () => { const f = fallback(msg); return { role: "ai", text: f.ask, suggest: f.suggest }; };
     say({ role: "you", text: msg });
     const before = deepCopy(params);
     const t0 = performance.now();
 
     const res = parseIntent(msg, params);
-    if (res?.ask) { say({ role: "ai", text: res.ask }); return; }
+    /* órdenes sobre el diseño entero: siempre reversibles con «deshaz» */
+    if (res?.action === "reset") {
+      history.current.push(before);
+      setParams(normalize(DEFAULT()));
+      setSelection(null);
+      say({ role: "ai", text: "Hecho: he vuelto a la estantería de partida. Si ha sido sin querer, dime «deshaz».", suggest: ["Deshaz"] });
+      return;
+    }
+    if (res?.action === "undo") {
+      const prev = history.current.pop();
+      if (!prev) { say({ role: "ai", text: "Todavía no hay nada que deshacer." }); return; }
+      setParams(normalize(prev));
+      setSelection(null);
+      say({ role: "ai", text: "Deshecho: he vuelto al paso anterior." });
+      return;
+    }
+    if (res?.ask) { say({ role: "ai", text: res.ask, suggest: res.suggest }); return; }
     if (res) {
       const after = normalize(res.params);
       history.current.push(before);
@@ -148,7 +158,7 @@ export default function Configurator() {
       return;
     }
 
-    if (copilot.current === false) { say({ role: "ai", text: NO_ENTIENDO }); return; }
+    if (copilot.current === false) { say(fb()); return; }
 
     setBusy(true);
     say({ role: "ai", text: "Pensando…", pending: true });
@@ -163,11 +173,11 @@ export default function Configurator() {
       if (data.error === "sin_clave") {
         copilot.current = false;
         setCopilotOn(false);
-        say({ role: "ai", text: NO_ENTIENDO });
+        say(fb());
         return;
       }
       if (!r.ok || !data.params) {
-        say({ role: "ai", text: data.reply || NO_ENTIENDO });
+        say(data.reply ? { role: "ai", text: data.reply } : fb());
         return;
       }
       copilot.current = true;
@@ -179,7 +189,7 @@ export default function Configurator() {
       say({ role: "ai", text: data.reply || "Hecho.", chips: diffChips(before, after), src: "server" });
     } catch {
       setMessages((xs) => xs.filter((m) => !m.pending));
-      say({ role: "ai", text: NO_ENTIENDO });
+      say(fb());
     } finally {
       setBusy(false);
     }

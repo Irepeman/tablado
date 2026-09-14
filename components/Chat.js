@@ -58,6 +58,13 @@ export default function Chat({ messages, busy, onSend }) {
                         : <>Resuelto <b>en el navegador</b> · {m.src}</>}
                     </span>
                   )}
+                  {m.suggest?.length > 0 && (
+                    <div className="sugg">
+                      {m.suggest.map((x) => (
+                        <button key={x} className="chip" onClick={() => onSend(x)} disabled={busy}>{x}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
