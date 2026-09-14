@@ -22,11 +22,11 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
 
 const Viewport = forwardRef(function Viewport(
-  { params, onChange, onCommit, selection, onSelect, exploded, showScale }, ref) {
+  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress }, ref) {
   const canvasRef = useRef(null);
   const S = useRef(null);              // todo el estado imperativo de three.js
   const propsRef = useRef({});
-  propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale };
+  propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress };
 
   /* ---------- montaje: escena, luces, entorno, controles ---------- */
   useEffect(() => {
@@ -126,7 +126,9 @@ const Viewport = forwardRef(function Viewport(
     composer.addPass(new OutputPass());   // tono Neutral + sRGB, al final de la cadena
 
     const st = {
-      renderer, scene, camera, root, fig, floor, wall,
+      renderer, scene, camera, root, fig, floor, wall, shadowPlane,
+      pt: null, photoOn: false, photoEnv: null, rasterEnv: null,
+      ptSceneDirty: true, ptCamDirty: false, lastCam: new THREE.Matrix4(), lastReport: 0,
       box: new THREE.BoxGeometry(1, 1, 1),
       meshes: [], geo: null, grain: {}, mats: {},
       backMat: new THREE.MeshStandardMaterial({ color: 0xb9ae99, roughness: 0.9 }),
@@ -377,11 +379,34 @@ const Viewport = forwardRef(function Viewport(
         renderer.setSize(w, h, false);
         composer.setPixelRatio(pr);
         composer.setSize(w, h);
+        st.ptCamDirty = true;
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
       }
       stepCam();
-      composer.render();
+      if (st.photoOn && st.pt) {
+        /* Modo foto: cada fotograma suma una muestra. Si la cámara se mueve
+           se reinicia la acumulación y se ve el render normal hasta converger. */
+        camera.updateMatrixWorld();
+        if (st.ptSceneDirty) {
+          st.pt.setScene(scene, camera);
+          st.pt.updateEnvironment();
+          st.ptSceneDirty = false;
+          st.lastCam.copy(camera.matrixWorld);
+        } else if (st.ptCamDirty || !camera.matrixWorld.equals(st.lastCam)) {
+          st.pt.updateCamera();
+          st.lastCam.copy(camera.matrixWorld);
+          st.ptCamDirty = false;
+        }
+        st.pt.renderSample();
+        const now = performance.now();
+        if (now - st.lastReport > 250) {
+          st.lastReport = now;
+          propsRef.current.onPhotoProgress?.(Math.floor(st.pt.samples));
+        }
+      } else {
+        composer.render();
+      }
       st.raf = requestAnimationFrame(loop);
     };
     loop();
@@ -398,6 +423,7 @@ const Viewport = forwardRef(function Viewport(
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dblclick", onDbl);
       canvas.removeEventListener("contextmenu", noMenu);
+      st.pt?.dispose();
       composer.dispose();
       renderer.dispose();
     };
@@ -500,8 +526,62 @@ const Viewport = forwardRef(function Viewport(
 
     st.root.position.y = p.base === "flotante" ? 0.42 : 0;
     st.fig.position.set((p.width / 2 + 560) / 1000, 0, p.depth / 2000);
-    st.fig.visible = !!showScale;
+    st.fig.visible = !!showScale && !st.photoOn;
+    st.ptSceneDirty = true;   // el trazador reconstruye su escena si cambia el mueble
   }, [params, selection, exploded, showScale]);
+
+  /* ---------- modo foto: trazado de rutas ----------
+     La librería se carga solo al activarlo: no pesa en la carga inicial y no
+     se evalúa en el servidor. Solo admite entornos equirectangulares, así que
+     mientras dura se usa un degradado de estudio y luego se restaura el
+     nuestro. El plano de sombra (ShadowMaterial) no lo entiende: se oculta,
+     y el suelo real recibe las sombras trazadas. */
+  useEffect(() => {
+    const st = S.current;
+    if (!st) return;
+    let cancelled = false;
+    if (photo) {
+      (async () => {
+        if (!st.pt) {
+          const { WebGLPathTracer, GradientEquirectTexture } = await import("three-gpu-pathtracer");
+          if (cancelled) return;
+          const pt = new WebGLPathTracer(st.renderer);
+          pt.tiles.set(2, 2);
+          pt.bounces = 6;
+          pt.minSamples = 3;
+          pt.renderDelay = 80;
+          pt.fadeDuration = 400;
+          pt.filterGlossyFactor = 0.5;
+          pt.dynamicLowRes = true;
+          pt.lowResScale = 0.25;
+          pt.textureSize.set(2048, 2048);    // que la veta no se emborrone
+          const env = new GradientEquirectTexture();
+          env.topColor.set(0xfaf7f0);
+          env.bottomColor.set(0x6f6a60);
+          env.exponent = 2;
+          env.update();
+          st.pt = pt;
+          st.photoEnv = env;
+        }
+        if (cancelled) return;
+        st.rasterEnv = st.scene.environment;
+        st.scene.environment = st.photoEnv;
+        st.scene.environmentIntensity = 1.0;
+        st.shadowPlane.visible = false;
+        st.fig.visible = false;
+        st.ptSceneDirty = true;
+        st.photoOn = true;
+      })();
+    } else if (st.photoOn) {
+      st.photoOn = false;
+      st.scene.environment = st.rasterEnv;
+      st.scene.environmentIntensity = 0.7;
+      st.shadowPlane.visible = true;
+      st.fig.visible = !!propsRef.current.showScale;
+      propsRef.current.onPhotoProgress?.(0);
+    }
+    return () => { cancelled = true; };
+  }, [photo]);
 
   useImperativeHandle(ref, () => ({
     frame(preset, instant) {

@@ -62,6 +62,8 @@ export default function Configurator() {
   const [toast, setToast] = useState("");
   const [selBox, setSelBox] = useState(null);
   const [tab, setTab] = useState("spec");
+  const [photo, setPhoto] = useState(false);
+  const [photoSamples, setPhotoSamples] = useState(0);
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -285,6 +287,7 @@ export default function Configurator() {
         <div className="bar-right">
           <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>Escala 1,70 m</button>
           <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>Despiece</button>
+          <button className="tbtn photo-btn" aria-pressed={photo} onClick={() => setPhoto((v) => !v)}>Modo foto</button>
           <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>Modo fundador</button>
           <button className="tbtn" onClick={undo}>Deshacer</button>
         </div>
@@ -299,6 +302,7 @@ export default function Configurator() {
           <Viewport
             ref={vp} params={params} selection={selection}
             exploded={exploded} showScale={showScale}
+            photo={photo} onPhotoProgress={setPhotoSamples}
             onChange={onEdit} onCommit={(snap) => { history.current.push(snap); }}
             onSelect={setSelection}
           />
@@ -310,6 +314,11 @@ export default function Configurator() {
               <div className="glass pill">
                 <b>{MATERIALS[params.material].name}</b> · {params.thickness} mm
               </div>
+              {photo && (
+                <div className="glass pill mono">
+                  {photoSamples < 3 ? "Modo foto · preparando…" : `Modo foto · ${photoSamples} muestras`}
+                </div>
+              )}
             </div>
             <div className="vp-tr">
               <button className="glass iconbtn" title="Vista frontal" onClick={() => vp.current?.frame("front")}>▣</button>

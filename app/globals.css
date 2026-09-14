@@ -259,4 +259,6 @@ table.cut .r{text-align:right}
   .scroll{overflow:visible}
   .vp-bl{display:none}
 }
+/* el trazado de rutas es demasiado pesado para móviles */
+@media (max-width:900px),(pointer:coarse){.photo-btn{display:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
