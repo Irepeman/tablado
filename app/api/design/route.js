@@ -62,7 +62,7 @@ function systemPrompt(p) {
   const spans = MATKEYS
     .map((k) => `${MATERIALS[k].short} ${t} mm ≈ ${Math.round(maxSpan(k, t))} mm`)
     .join(" · ");
-  return `Eres el copiloto de diseño de Tablado, una marca de estanterías a medida fabricadas por control numérico sobre tablero.
+  return `Eres el copiloto de diseño de Cutwise, una marca de estanterías a medida fabricadas por control numérico sobre tablero.
 
 Traduces lo que pide el cliente a parámetros. No describes muebles: devuelves el objeto completo actualizado.
 
@@ -96,7 +96,7 @@ export async function POST(req) {
      configuración, y con un código que el cliente usa para dejar de
      preguntar al servidor durante el resto de la sesión. */
   if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn("[tablado] sin ANTHROPIC_API_KEY: solo motor local");
+    console.warn("[cutwise] sin ANTHROPIC_API_KEY: solo motor local");
     return Response.json({ error: "sin_clave", reply: null }, { status: 200 });
   }
 
@@ -148,12 +148,12 @@ export async function POST(req) {
         { status: 429 });
     }
     if (err instanceof Anthropic.APIError) {
-      console.error("[tablado] error de la API:", err.status, err.message);
+      console.error("[cutwise] error de la API:", err.status, err.message);
       return Response.json(
         { error: "api", reply: "El copiloto no ha podido responder. El editor sigue funcionando con normalidad." },
         { status: 502 });
     }
-    console.error("[tablado] error inesperado:", err);
+    console.error("[cutwise] error inesperado:", err);
     return Response.json(
       { error: "desconocido", reply: "Algo ha fallado por mi parte. Prueba a decirlo de otra forma." },
       { status: 500 });

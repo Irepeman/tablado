@@ -190,7 +190,7 @@ export default function Configurator() {
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `tablado-despiece-${mm(params.width)}x${mm(params.height)}.csv`;
+    a.download = `cutwise-despiece-${mm(params.width)}x${mm(params.height)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     flash("Despiece descargado");
@@ -275,7 +275,7 @@ export default function Configurator() {
   return (
     <div className="app">
       <header className="bar">
-        <div className="brand"><b>Tablado</b><span>Estantería a medida</span></div>
+        <div className="brand"><b>Cutwise</b><span>Estantería a medida</span></div>
         <div className="bar-sep" />
         <div className="bar-note">
           {copilotOn
@@ -352,7 +352,7 @@ export default function Configurator() {
             <h3>Listo para control numérico</h3>
             <p>Esto es lo que sale del configurador hacia el taller. Ni un paso manual entre el render y la máquina.</p>
             {[
-              ["Referencia", `TBL-${Date.now().toString(36).slice(-6).toUpperCase()}`],
+              ["Referencia", `CWS-${Date.now().toString(36).slice(-6).toUpperCase()}`],
               ["Medidas", `${mm(params.width)}×${mm(params.height)}×${mm(params.depth)}`],
               ["Material", `${MATERIALS[params.material].name} ${params.thickness} mm`],
               ["Piezas de tablero", modal.rows.reduce((a, r) => a + r.qty, 0)],

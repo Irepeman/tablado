@@ -6,7 +6,7 @@ const body = Instrument_Sans({ subsets: ["latin"], weight: ["400", "500", "600"]
 const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-mono" });
 
 export const metadata = {
-  title: "Tablado · Estantería a medida",
+  title: "Cutwise · Estantería a medida",
   description:
     "Diseña tu estantería hablando o arrastrando las piezas. Sale el despiece, el plan de corte y el precio real.",
 };

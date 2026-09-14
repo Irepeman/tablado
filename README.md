@@ -1,4 +1,4 @@
-# Tablado
+# Cutwise
 
 Configurador de estanterías a medida. El cliente diseña hablando o arrastrando
 las piezas; del mismo objeto de parámetros salen el render 3D, el despiece, el
