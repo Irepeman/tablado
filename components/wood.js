@@ -15,6 +15,7 @@
    la fibra y variación de tono de la pieza.
    ============================================================ */
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 
 export const SHEET_MM = { L: 2800, W: 2070 };
 
@@ -250,8 +251,15 @@ function hash2(str) {
 
 export function panelGeometry(sizeMm, id, plyEdges) {
   const dims = sizeMm;
-  const g = new THREE.BoxGeometry(dims[0] / 1000, dims[1] / 1000, dims[2] / 1000);
-  const thin = dims.indexOf(Math.min(...dims));
+  const minD = Math.min(...dims);
+  /* Canto suavizado de ~1,2 mm: un tablero real nunca tiene la arista viva,
+     y ese filo de luz en cada canto es lo que distingue una foto de un render.
+     Por debajo de 6 mm (la trasera) no se nota: caja simple. */
+  const g = minD >= 6
+    ? new RoundedBoxGeometry(dims[0] / 1000, dims[1] / 1000, dims[2] / 1000, 2, Math.min(1.2, minD * 0.3) / 1000)
+    : new THREE.BoxGeometry(dims[0] / 1000, dims[1] / 1000, dims[2] / 1000);
+
+  const thin = dims.indexOf(minD);
   let long = dims.indexOf(Math.max(...dims));
   if (long === thin) long = (thin + 1) % 3;
   const mid = 3 - thin - long;
@@ -261,34 +269,45 @@ export function panelGeometry(sizeMm, id, plyEdges) {
   const offV = h2 * Math.max(0, SHEET_MM.W - dims[mid]);
 
   const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
-  const axisOf = (i) => {
-    const ax = Math.abs(nor.getX(i)), ay = Math.abs(nor.getY(i)), az = Math.abs(nor.getZ(i));
-    return ax > 0.5 ? 0 : ay > 0.5 ? 1 : 2;
-  };
-  for (let i = 0; i < pos.count; i++) {
-    const na = axisOf(i);
-    const p = [
-      pos.getX(i) * 1000 + dims[0] / 2,
-      pos.getY(i) * 1000 + dims[1] / 2,
-      pos.getZ(i) * 1000 + dims[2] / 2,
-    ];
-    let u, v;
-    if (na === thin) {
-      u = (p[long] + offU) / SHEET_MM.L;
-      v = (p[mid] + offV) / SHEET_MM.W;
-    } else {
-      const e = na === long ? mid : long;
-      if (plyEdges) { u = p[e] / 400; v = p[thin] / dims[thin]; }
-      else { u = (p[e] + offU) / SHEET_MM.L; v = (p[thin] + offV) / SHEET_MM.W; }
+  const idx = g.index;
+  const vert = (i) => (idx ? idx.getX(i) : i);
+  const total = idx ? idx.count : pos.count;
+  const groups = g.groups.length ? g.groups.map((x) => ({ ...x })) : [{ start: 0, count: total }];
+
+  /* El lado de la caja se decide por grupo (media de normales), no por
+     vértice: así la franja redondeada del canto no mezcla dos mapeos. */
+  const sideAxis = (start, count) => {
+    let ax = 0, ay = 0, az = 0;
+    for (let i = start; i < start + count; i++) {
+      const v = vert(i);
+      ax += Math.abs(nor.getX(v)); ay += Math.abs(nor.getY(v)); az += Math.abs(nor.getZ(v));
     }
-    uv.setXY(i, u, v);
+    return ax >= ay && ax >= az ? 0 : ay >= az ? 1 : 2;
+  };
+
+  g.clearGroups();
+  for (const gr of groups) {
+    const na = sideAxis(gr.start, gr.count);
+    for (let i = gr.start; i < gr.start + gr.count; i++) {
+      const v = vert(i);
+      const pnt = [
+        pos.getX(v) * 1000 + dims[0] / 2,
+        pos.getY(v) * 1000 + dims[1] / 2,
+        pos.getZ(v) * 1000 + dims[2] / 2,
+      ];
+      let u, w;
+      if (na === thin) {
+        u = (pnt[long] + offU) / SHEET_MM.L;
+        w = (pnt[mid] + offV) / SHEET_MM.W;
+      } else {
+        const e = na === long ? mid : long;
+        if (plyEdges) { u = pnt[e] / 400; w = Math.min(1, Math.max(0, pnt[thin] / dims[thin])); }
+        else { u = (pnt[e] + offU) / SHEET_MM.L; w = (pnt[thin] + offV) / SHEET_MM.W; }
+      }
+      uv.setXY(v, u, w);
+    }
+    g.addGroup(gr.start, gr.count, na === thin ? 0 : 1);
   }
   uv.needsUpdate = true;
-
-  const idx = g.index;
-  g.clearGroups();
-  for (let f = 0; f < 6; f++) {
-    g.addGroup(f * 6, 6, axisOf(idx.getX(f * 6)) === thin ? 0 : 1);
-  }
   return g;
 }

@@ -13,32 +13,13 @@ import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
 import { MATERIALS, DRAWER_H, build, clamp, deepCopy } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
-
-function makeEnv(renderer) {
-  const c = document.createElement("canvas");
-  c.width = 768; c.height = 384;
-  const g = c.getContext("2d");
-  const sky = g.createLinearGradient(0, 0, 0, 384);
-  sky.addColorStop(0, "#f6f4ef"); sky.addColorStop(0.42, "#e6e3da");
-  sky.addColorStop(0.52, "#b8b4a8"); sky.addColorStop(1, "#4d4b45");
-  g.fillStyle = sky; g.fillRect(0, 0, 768, 384);
-  const win = (x, y, w, h, a) => {
-    const rg = g.createRadialGradient(x + w / 2, y + h / 2, 4, x + w / 2, y + h / 2, Math.max(w, h) * 0.72);
-    rg.addColorStop(0, `rgba(255,253,246,${a})`);
-    rg.addColorStop(1, "rgba(255,253,246,0)");
-    g.fillStyle = rg; g.fillRect(x - w, y - h, w * 3, h * 3);
-  };
-  win(120, 70, 180, 150, 1); win(520, 95, 140, 120, 0.62); win(340, 20, 90, 70, 0.35);
-  const tex = new THREE.CanvasTexture(c);
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  const pm = new THREE.PMREMGenerator(renderer);
-  pm.compileEquirectangularShader();
-  const rt = pm.fromEquirectangular(tex);
-  tex.dispose(); pm.dispose();
-  return rt.texture;
-}
 
 const Viewport = forwardRef(function Viewport(
   { params, onChange, onCommit, selection, onSelect, exploded, showScale }, ref) {
@@ -66,7 +47,12 @@ const Viewport = forwardRef(function Viewport(
     const camera = new THREE.PerspectiveCamera(34, 1, 0.05, 80);
     const root = new THREE.Group();
     scene.add(root);
-    scene.environment = makeEnv(renderer);
+    /* Estudio con paneles de luz en lugar de un degradado pintado: son los
+       reflejos que un fotógrafo de producto pondría sobre el barniz. */
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    scene.environmentIntensity = 0.7;
 
     const key = new THREE.DirectionalLight(0xfff6e8, 1.25);
     key.position.set(2.6, 4.2, 3.2);
@@ -80,7 +66,7 @@ const Viewport = forwardRef(function Viewport(
     const fill = new THREE.DirectionalLight(0xdfe8f2, 0.34);
     fill.position.set(-4, 2, -2);
     scene.add(fill);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8577, 0.32));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8577, 0.18));
 
     const shadowPlane = new THREE.Mesh(new THREE.PlaneGeometry(30, 30),
       new THREE.ShadowMaterial({ opacity: 0.24 }));
@@ -123,6 +109,21 @@ const Viewport = forwardRef(function Viewport(
       m.position.y = 0.85;
       fig.add(m);
     }
+
+    /* Oclusión ambiental (GTAO): oscurece esquinas interiores, uniones y el
+       contacto con el suelo. En muebles de cajas es el mayor salto de realismo.
+       En móviles pesa demasiado y se apaga. */
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const gtao = new GTAOPass(scene, camera, 1, 1);
+    gtao.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, thickness: 1.2,
+                              distanceFallOff: 1, scale: 1.15, samples: 16 });
+    gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+    gtao.blendIntensity = 0.9;
+    gtao.enabled = !(window.matchMedia("(pointer: coarse)").matches ||
+                     Math.min(window.innerWidth, window.innerHeight) < 500);
+    composer.addPass(gtao);
+    composer.addPass(new OutputPass());   // tono Neutral + sRGB, al final de la cadena
 
     const st = {
       renderer, scene, camera, root, fig, floor, wall,
@@ -374,11 +375,13 @@ const Viewport = forwardRef(function Viewport(
       const pr = renderer.getPixelRatio();
       if (canvas.width !== Math.round(w * pr) || canvas.height !== Math.round(h * pr)) {
         renderer.setSize(w, h, false);
+        composer.setPixelRatio(pr);
+        composer.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
       }
       stepCam();
-      renderer.render(scene, camera);
+      composer.render();
       st.raf = requestAnimationFrame(loop);
     };
     loop();
@@ -395,6 +398,7 @@ const Viewport = forwardRef(function Viewport(
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dblclick", onDbl);
       canvas.removeEventListener("contextmenu", noMenu);
+      composer.dispose();
       renderer.dispose();
     };
   }, []);
@@ -425,11 +429,13 @@ const Viewport = forwardRef(function Viewport(
           emissive: new THREE.Color(0x8a3f12), emissiveIntensity: 0.22 });
       } else if (wood) {
         const sheet = woodSheet(p.material, R);
-        m = new THREE.MeshStandardMaterial({
+        m = new THREE.MeshPhysicalMaterial({
           map: sheet.map, bumpMap: sheet.bump, bumpScale: 1.0,
-          roughness: M.rough, metalness: 0 });
+          roughness: M.rough, metalness: 0,
+          clearcoat: 0.3, clearcoatRoughness: 0.45 });   // barniz satinado
       } else {
-        m = new THREE.MeshStandardMaterial({ color: M.hex, roughness: M.rough, metalness: 0 });
+        m = new THREE.MeshPhysicalMaterial({ color: M.hex, roughness: M.rough, metalness: 0,
+          clearcoat: 0.18, clearcoatRoughness: 0.3 });      // melamina: brillo suave
       }
       st.mats[ck] = m;
       return m;
