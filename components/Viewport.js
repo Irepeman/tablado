@@ -11,7 +11,7 @@
    ============================================================ */
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import { MATERIALS, DRAWER_H, build, clamp, deepCopy } from "@/lib/model";
+import { MATERIALS, DRAWER_H, build, clamp, deepCopy, legCount } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -502,7 +502,9 @@ const Viewport = forwardRef(function Viewport(
 
     if (p.base === "patas") {
       const r = 0.017, h = p.baseHeight / 1000;
-      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
+      const legs = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+      if (legCount(p) === 6) legs.push([0, -1], [0, 1]);   // apoyo central en muebles anchos
+      legs.forEach(([sx, sz]) => {
         const leg = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.72, r, h, 14), st.metalMat);
         leg.position.set((sx * (p.width / 2 - 70)) / 1000, h / 2, (sz * (p.depth / 2 - 60)) / 1000);
         leg.castShadow = true;
@@ -513,11 +515,21 @@ const Viewport = forwardRef(function Viewport(
     }
 
     geo.parts.filter((x) => x.grp === "frente" && x.pos).forEach((x) => {
-      const hnd = new THREE.Mesh(
-        new THREE.BoxGeometry(Math.min(x.L * 0.42, 180) / 1000, 0.009, 0.022), st.metalMat);
       const z = x.pos[2] + (exploded ? 260 : 0);
-      hnd.position.set(x.pos[0] / 1000, (x.pos[1] + x.Wd / 2 - 45) / 1000,
-                       (z + p.thickness / 2 + 11) / 1000);
+      let hnd;
+      if (x.hinge) {
+        /* puerta: tirador vertical en el lado de apertura, a una altura alcanzable */
+        const len = Math.min(x.Wd * 0.25, 220);
+        hnd = new THREE.Mesh(new THREE.BoxGeometry(0.009, len / 1000, 0.022), st.metalMat);
+        const side = x.hinge === "L" ? 1 : -1;
+        const bottom = x.pos[1] - x.Wd / 2, top = x.pos[1] + x.Wd / 2;
+        const yh = clamp(1000, bottom + len / 2 + 60, top - len / 2 - 60);
+        hnd.position.set((x.pos[0] + side * (x.L / 2 - 40)) / 1000, yh / 1000, (z + p.thickness / 2 + 11) / 1000);
+      } else {
+        /* cajón: tirador horizontal centrado cerca del canto superior */
+        hnd = new THREE.Mesh(new THREE.BoxGeometry(Math.min(x.L * 0.42, 180) / 1000, 0.009, 0.022), st.metalMat);
+        hnd.position.set(x.pos[0] / 1000, (x.pos[1] + x.Wd / 2 - 45) / 1000, (z + p.thickness / 2 + 11) / 1000);
+      }
       hnd.castShadow = true;
       hnd.userData = { grp: "tirador" };
       st.root.add(hnd);

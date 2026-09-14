@@ -1,11 +1,39 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, DRAWER_H,
   maxSpan, validate, addColumn, redistribute, setShelfCount, deepCopy, build,
 } from "@/lib/model";
 import { cutlist, nest, quote, PRICE, mm, eur, eur2 } from "@/lib/pricing";
+
+/* Campo numérico con borrador propio: se escribe libremente y el valor solo
+   se aplica al pulsar Intro o salir del campo (Esc cancela). Antes, cada
+   tecla pasaba por normalize() y al teclear «2» el campo saltaba a 600. */
+function NumField({ value, onCommit }) {
+  const [draft, setDraft] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+  const cancel = useRef(false);
+  useEffect(() => { if (!editing) setDraft(String(value)); }, [value, editing]);
+  const commit = () => {
+    setEditing(false);
+    if (cancel.current) { cancel.current = false; setDraft(String(value)); return; }
+    let v = Number(String(draft).replace(",", ".").trim());
+    if (Number.isFinite(v) && v > 0 && v < 10) v *= 1000;     // «2,1» → 2100 mm
+    if (Number.isFinite(v) && v > 0 && Math.round(v) !== value) onCommit(Math.round(v));
+    else setDraft(String(value));
+  };
+  return (
+    <input className="numin mono" inputMode="decimal" value={draft}
+           onFocus={(e) => { setEditing(true); e.target.select(); }}
+           onChange={(e) => setDraft(e.target.value)}
+           onBlur={commit}
+           onKeyDown={(e) => {
+             if (e.key === "Enter") e.currentTarget.blur();
+             if (e.key === "Escape") { cancel.current = true; e.currentTarget.blur(); }
+           }} />
+  );
+}
 
 function Seg({ options, value, onPick }) {
   return (
@@ -21,7 +49,7 @@ function Seg({ options, value, onPick }) {
 }
 
 export default function SpecRail({
-  params, selection, founder, onEdit, onCommitEdit, onOrder, onCsv, onReset,
+  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset,
 }) {
   const p = params;
   const t = p.thickness;
@@ -46,6 +74,12 @@ export default function SpecRail({
   }, [p, t]);
 
   const edit = (fn) => { const n = deepCopy(p); fn(n); onCommitEdit(n); };
+  /* deslizadores: se guarda el estado de ANTES al pulsar y se apila al soltar,
+     para que «Deshacer» vuelva al valor previo al arrastre */
+  const snap = useRef(null);
+  const grab = () => { if (!snap.current) snap.current = deepCopy(p); };
+  const release = () => { if (snap.current) { onPushHistory(snap.current); snap.current = null; } };
+  const maxDrawers = Math.min(4, Math.max(0, Math.floor((p.height - p.baseHeight - 2 * p.thickness) / DRAWER_H)));
   const live = (fn) => { const n = deepCopy(p); fn(n); onEdit(n); };
 
   const pieces = rows.reduce((a, r) => a + r.qty, 0);
@@ -61,16 +95,15 @@ export default function SpecRail({
               {p.columns.length} col · {p.columns.reduce((a, c) => a + c.shelves.length, 0)} baldas
             </em>
           </h3>
-          {[["Ancho", "width", 600, 3200], ["Alto", "height", 600, 2600], ["Fondo", "depth", 180, 600]]
+          {[["Ancho", "width", 400, 3200], ["Alto", "height", 400, 2600], ["Fondo", "depth", 180, 600]]
             .map(([label, key, min, max]) => (
               <div className="f" key={key}>
                 <label htmlFor={key}>{label}</label>
                 <input id={key} type="range" min={min} max={max} step={10} value={p[key]}
+                       onPointerDown={grab} onKeyDown={grab}
                        onChange={(e) => live((n) => { n[key] = Number(e.target.value); })}
-                       onPointerUp={() => onCommitEdit(p)} />
-                <input className="numin mono" inputMode="numeric" value={p[key]}
-                       onChange={(e) => live((n) => { n[key] = Number(e.target.value) || n[key]; })}
-                       onBlur={() => onCommitEdit(p)} />
+                       onPointerUp={release} onKeyUp={release} onBlur={release} />
+                <NumField value={p[key]} onCommit={(v) => edit((n) => { n[key] = v; })} />
               </div>
             ))}
         </section>
@@ -142,14 +175,16 @@ export default function SpecRail({
                     {c.door ? " · puerta" : ""}
                   </span>
                   <div className="acts">
-                    <button className="mini" onClick={() =>
-                      edit((n) => setShelfCount(n, n.columns[i], c.shelves.length + 1))}>+balda</button>
-                    <button className="mini" onClick={() =>
-                      edit((n) => { n.columns[i].drawers = c.drawers ? c.drawers - 1 : 2; })}>
-                      {c.drawers ? "−cajón" : "+cajón"}
-                    </button>
-                    <button className="mini" onClick={() =>
-                      edit((n) => { n.columns[i].door = !c.door; })}>
+                    <button className="mini" disabled={!c.shelves.length} title="Quitar una balda"
+                      onClick={() => edit((n) => setShelfCount(n, n.columns[i], c.shelves.length - 1))}>−balda</button>
+                    <button className="mini" title="Añadir una balda"
+                      onClick={() => edit((n) => setShelfCount(n, n.columns[i], c.shelves.length + 1))}>+balda</button>
+                    <button className="mini" disabled={!c.drawers} title="Quitar un cajón"
+                      onClick={() => edit((n) => { n.columns[i].drawers = c.drawers - 1; })}>−cajón</button>
+                    <button className="mini" disabled={c.drawers >= maxDrawers} title="Añadir un cajón"
+                      onClick={() => edit((n) => { n.columns[i].drawers = c.drawers + 1; })}>+cajón</button>
+                    <button className="mini"
+                      onClick={() => edit((n) => { n.columns[i].door = !c.door; })}>
                       {c.door ? "−puerta" : "+puerta"}
                     </button>
                   </div>
@@ -197,7 +232,7 @@ export default function SpecRail({
               ["Peso montado", `${Math.round(q.weight)}`, "kg"],
               ["Canto aplicado", `${q.edgeML.toFixed(1)}`, "m"],
               ["Luz máx. admisible", mm(span), "mm"],
-              ["Herrajes", `${q.hw.minifix + q.hw.pins + q.hw.hinges * 2 + q.hw.runners * 2}`, "ud"],
+              ["Herrajes", `${q.hw.minifix + q.hw.pins + q.hw.hinges + q.hw.runners * 2}`, "ud"],
               ["Plazo estimado", "12–16", "días"],
             ].map(([k, v, u]) => (
               <div className="stat" key={k}>

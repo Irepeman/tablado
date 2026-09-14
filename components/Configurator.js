@@ -105,7 +105,9 @@ export default function Configurator() {
           ? x.grp === "balda" && x.col === selection.col && x.shelf === selection.shelf
           : x.grp === "divisor" && x.div === selection.div);
       const pr = part && vp.current?.project(part);
-      setSelBox(pr ? { x: clamp(pr.x + 16, 8, pr.w - 215), y: clamp(pr.y - 14, 8, pr.h - 150) } : null);
+      const next = pr ? { x: clamp(pr.x + 16, 8, pr.w - 215), y: clamp(pr.y - 14, 8, pr.h - 150) } : null;
+      // solo si se mueve: antes re-renderizaba toda la app 60 veces por segundo
+      setSelBox((prev) => (prev && next && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5) ? prev : next);
       raf = requestAnimationFrame(tick);
     };
     tick();
@@ -129,6 +131,17 @@ export default function Configurator() {
       const warn = validate(after, build(after)).find((f) => f.lvl === "warn");
       const bits = [res.changes.join(", ").replace(/^./, (c) => c.toUpperCase()) + "."];
       if (res.notes.length) bits.push(res.notes.join("; ") + ".");
+      // Si normalize() corrigió lo pedido, se dice: el mensaje no puede contradecir el resultado.
+      const req = res.params;
+      if (req.columns.length !== after.columns.length) {
+        bits.push(`He dejado ${after.columns.length} columnas: ninguna puede pasar de 1,5 m, no hay tablero que aguante esa luz.`);
+      }
+      for (const [k, name, lo, hi] of [["width", "ancho", 400, 3200], ["height", "alto", 400, 2600], ["depth", "fondo", 180, 600]]) {
+        if (Math.abs(Math.round(req[k]) - after[k]) > 10) bits.push(`El ${name} va de ${mm(lo)} a ${mm(hi)} mm: lo he dejado en ${mm(after[k])} mm.`);
+      }
+      const reqDr = req.columns.reduce((acc, c) => acc + (c.drawers || 0), 0);
+      const aftDr = after.columns.reduce((acc, c) => acc + c.drawers, 0);
+      if (aftDr < reqDr) bits.push(`Con esta altura no caben tantos cajones: he dejado ${aftDr}.`);
       if (warn) bits.push("Ojo: " + warn.d.replace(/^./, (c) => c.toLowerCase()));
       say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after),
             src: (performance.now() - t0).toFixed(1).replace(".", ",") + " ms" });
@@ -343,6 +356,7 @@ export default function Configurator() {
           <SpecRail
             params={params} selection={selection} founder={founder}
             onEdit={onEdit} onCommitEdit={onCommitEdit}
+            onPushHistory={(snap) => { history.current.push(snap); }}
             onOrder={(q, rows, nested) => setModal({ q, rows, nested })}
             onCsv={downloadCsv}
             onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); vp.current?.frame("34"); }}

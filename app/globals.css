@@ -170,7 +170,8 @@ header.bar{display:flex;align-items:center;gap:16px;padding:0 16px;height:52px;
 .col .acts button{flex:1}
 .mini{font-size:11px;color:var(--ink-3);padding:2px 5px;border:1px solid var(--line);
   border-radius:3px;background:var(--paper-2)}
-.mini:hover{border-color:var(--pine);color:var(--pine)}
+.mini:hover:not(:disabled){border-color:var(--pine);color:var(--pine)}
+.mini:disabled{opacity:.4;cursor:default}
 
 .flags{display:flex;flex-direction:column;gap:7px}
 .flag{display:flex;gap:8px;font-size:12px;line-height:1.4;padding:8px 9px;
