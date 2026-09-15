@@ -124,6 +124,38 @@ const fb = fallback("blablá");
 if (!(fb.ask && fb.suggest?.length)) fails.push("fallback sin sugerencias");
 
 /* cada sugerencia que ofrece el chat tiene que funcionar al pulsarla */
+/* conversación: cada frase se aplica sobre el resultado de la anterior,
+   con el tema del último cambio (como en la app) */
+function conv(msgs, expect, setup) {
+  n++;
+  let p = base();
+  if (setup) { setup(p); p = normalize(p); }
+  let ctx = {}, res, ok = false, err = "";
+  try {
+    for (const m of msgs) {
+      res = parseIntent(m, p, ctx);
+      if (res && res.params) { p = normalize(res.params); ctx = { topic: res.topic }; }
+    }
+    ok = !!expect({ a: p, r: res });
+  } catch (e) { err = ` [excepción: ${e.message}]`; }
+  if (!ok) fails.push(`«${msgs.join(" → ")}» → ${describe(res)}${err}`);
+}
+const even = (c, floor) => {
+  const pts = [floor, ...c.shelves];
+  const gaps = pts.slice(1).map((v, i) => v - pts[i]);
+  return gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) <= 2;
+};
+conv(["quiero cajones", "en todos los cuadros"], ({ a }) => allCols(a, (c) => c.drawers === 2));
+conv(["quiero cajones"], ({ a, r }) => col(a, 0).drawers === 2 && /columna 1/.test(r.changes.join(" ")) && r.suggest?.length === 2);
+conv(["quiero cajones"], ({ a }) => even(col(a, 0), 2 * 190 + 40) && col(a, 0).shelves.length === 3);
+conv(["quiero cajones", "mejor a la derecha"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0);
+conv(["pon puertas en la primera", "también en la tercera"], ({ a }) => col(a, 0).door && col(a, 2).door && !col(a, 1).door);
+conv(["una balda más en la segunda", "y en la cuarta"], ({ a }) => col(a, 1).shelves.length === 4 && col(a, 3).shelves.length === 4 && col(a, 0).shelves.length === 3);
+conv(["dos cajones en el segundo cuadro"], ({ a }) => col(a, 1).drawers === 2 && col(a, 0).drawers === 0);
+conv(["en todas"], ({ r }) => r === null);
+conv(["Mejor los cajones a la derecha"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0, (b) => { b.columns[0].drawers = 2; });
+conv(["Cajones en todas las columnas"], ({ a }) => allCols(a, (c) => c.drawers === 2));
+
 for (const s of new Set(ALL_SUGGESTIONS)) {
   n++;
   const r = parseIntent(s, base());

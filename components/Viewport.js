@@ -179,6 +179,7 @@ const Viewport = forwardRef(function Viewport(
     const stepCam = () => {
       const c = st.cam;
       c.tPhi = clamp(c.tPhi, 0.22, 1.6);
+      c.tTheta = clamp(c.tTheta, -1.25, 1.25);   // ±72°: nunca por detrás
       c.tR = clamp(c.tR, R_MIN, R_MAX);
       const dT = c.tTheta - c.theta, dP = c.tPhi - c.phi, dR = c.tR - c.r;
       const dTg = c.tTarget.clone().sub(c.target);

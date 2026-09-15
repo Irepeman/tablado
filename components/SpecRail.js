@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, DRAWER_H,
-  maxSpan, validate, addColumn, redistribute, setShelfCount, deepCopy, build,
+  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build,
 } from "@/lib/model";
 import { cutlist, nest, quote, PRICE } from "@/lib/pricing";
 import { tr, num, money, matShort } from "@/lib/i18n";
@@ -185,9 +185,9 @@ export default function SpecRail({
                     <button className="mini" title={L.tPlusShelf}
                       onClick={() => edit((x) => setShelfCount(x, x.columns[i], c.shelves.length + 1))}>{L.plusShelf}</button>
                     <button className="mini" disabled={!c.drawers} title={L.tMinusDrawer}
-                      onClick={() => edit((x) => { x.columns[i].drawers = c.drawers - 1; })}>{L.minusDrawer}</button>
+                      onClick={() => edit((x) => setDrawers(x, x.columns[i], c.drawers - 1))}>{L.minusDrawer}</button>
                     <button className="mini" disabled={c.drawers >= maxDrawers} title={L.tPlusDrawer}
-                      onClick={() => edit((x) => { x.columns[i].drawers = c.drawers + 1; })}>{L.plusDrawer}</button>
+                      onClick={() => edit((x) => setDrawers(x, x.columns[i], c.drawers + 1))}>{L.plusDrawer}</button>
                     <button className="mini"
                       onClick={() => edit((x) => { x.columns[i].door = !c.door; })}>
                       {c.door ? L.minusDoor : L.plusDoor}

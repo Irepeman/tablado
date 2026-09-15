@@ -125,6 +125,30 @@ t("make it 2.4 meters wide and 35 centimetres deep", ({ a }) => a.width === 2400
 t("how much is it?", ask(/€\d,\d{3}/));
 t("MAKE IT WIDER", ({ a, b }) => a.width === b.width + 260);
 
+/* conversation: each message applies to the previous result, with the last topic */
+function conv(msgs, expect, setup) {
+  n++;
+  let p = base();
+  if (setup) { setup(p); p = normalize(p); }
+  let ctx = {}, res, ok = false, err = "";
+  try {
+    for (const m of msgs) {
+      res = parseIntentEN(m, p, ctx);
+      if (res && res.params) { p = normalize(res.params); ctx = { topic: res.topic }; }
+    }
+    ok = !!expect({ a: p, r: res });
+  } catch (e) { err = ` [exception: ${e.message}]`; }
+  if (!ok) fails.push(`«${msgs.join(" → ")}» → ${describe(res)}${err}`);
+  const leak = [...texts(res), ...((res && res.suggest) || [])].find((x) => SPANISH.test(x));
+  if (leak) fails.push(`«${msgs.join(" → ")}» leaks Spanish: «${leak}»`);
+}
+conv(["I want drawers", "in all the boxes"], ({ a }) => allCols(a, (c) => c.drawers === 2));
+conv(["I want drawers"], ({ a, r }) => col(a, 0).drawers === 2 && /column 1/.test(r.changes.join(" ")) && r.suggest?.length === 2);
+conv(["I want drawers", "move them to the right"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0);
+conv(["add doors to the first column", "the third one too"], ({ a }) => col(a, 0).door && col(a, 2).door && !col(a, 1).door);
+conv(["one more shelf in the second", "and in the fourth"], ({ a }) => col(a, 1).shelves.length === 4 && col(a, 3).shelves.length === 4 && col(a, 0).shelves.length === 3);
+conv(["two drawers in every column"], ({ a, r }) => allCols(a, (c) => c.drawers === 2) && /every column/.test(r.changes.join(" ")));
+
 /* not understood → suggestions, in English */
 n++;
 const fb = fallbackEN("blah blah");

@@ -86,6 +86,8 @@ export default function Configurator() {
   const toastT = useRef(null);
   /* el chat aún no se ha tocado: al cambiar de idioma se traduce entero */
   const pristine = useRef(true);
+  /* de qué se habló en el último cambio: «en todas» se refiere a eso */
+  const topic = useRef(null);
 
   const say = (m) => setMessages((xs) => [...xs, m]);
   const flash = (t) => {
@@ -162,9 +164,11 @@ export default function Configurator() {
     const before = deepCopy(params);
     const t0 = performance.now();
 
-    const res = en ? parseIntentEN(msg, params) : parseIntent(msg, params);
+    const ctx = { topic: topic.current };
+    const res = en ? parseIntentEN(msg, params, ctx) : parseIntent(msg, params, ctx);
     /* órdenes sobre el diseño entero: siempre reversibles con «deshaz» */
     if (res?.action === "reset") {
+      topic.current = null;
       history.current.push(before);
       setParams(normalize(DEFAULT()));
       setSelection(null);
@@ -182,6 +186,7 @@ export default function Configurator() {
     if (res?.ask) { say({ role: "ai", text: res.ask, suggest: res.suggest }); return; }
     if (res) {
       const after = normalize(res.params);
+      topic.current = res.topic || null;
       history.current.push(before);
       setParams(after);
       setSelection(null);
@@ -199,7 +204,7 @@ export default function Configurator() {
       if (aftDr < reqDr) bits.push(T.drawersAdjusted(aftDr));
       if (warn) bits.push(T.watch + warn.d.replace(/^./, (c) => c.toLowerCase()));
       const ms = (performance.now() - t0).toFixed(1);
-      say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after, lang),
+      say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after, lang), suggest: res.suggest || undefined,
             src: (en ? ms : ms.replace(".", ",")) + " ms" });
       return;
     }
