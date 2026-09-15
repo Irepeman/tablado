@@ -8,44 +8,62 @@
    Resolución en dos capas:
      1. parseIntent() en el navegador — instantáneo y sin coste.
      2. /api/design — el modelo, en tu servidor, solo si la 1 falla.
+
+   Idioma: español o inglés. El motor es el mismo; lib/intent-en.js
+   traduce la frase a la entrada y la respuesta a la salida.
    ============================================================ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Viewport from "./Viewport";
 import Chat from "./Chat";
 import SpecRail from "./SpecRail";
 import {
-  DEFAULT, MATERIALS, DRAWER_H, normalize, build, validate,
+  DEFAULT, DRAWER_H, normalize, build, validate,
   maxSpan, deepCopy, clamp,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
-import { mm } from "@/lib/pricing";
+import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
+import { tr, num, matName, matShort } from "@/lib/i18n";
 
-const INTRO = [
-  { role: "ai", text: "Estantería de 2,40 × 2,00 m en roble, cuatro columnas. Dime qué cambiar: medidas, material, columnas, baldas, cajones, puertas — o para qué la quieres («para vinilos», «para libros»). También puedes arrastrar las baldas y los divisores directamente sobre la pieza." },
-  { role: "sys", text: "El motor de diseño corre en tu dispositivo: sin cuenta, sin espera y sin coste. Escribe como hablarías con un carpintero." },
-];
+const LANG_KEY = "cutwise-lang";
+const intro = (lang) => {
+  const L = tr(lang);
+  return [{ role: "ai", text: L.intro }, { role: "sys", text: L.introSys }];
+};
 
-function diffChips(a, b) {
+const CHIP_WORDS = {
+  es: { width: "ancho", height: "alto", depth: "fondo", thick: "espesor", back: "con trasera", noBack: "sin trasera",
+        cols: "columnas", drawers: "cajones", shelves: "baldas", doors: "puertas",
+        base: { patas: "patas", zocalo: "zócalo", flotante: "suspendida" } },
+  en: { width: "width", height: "height", depth: "depth", thick: "thickness", back: "with back", noBack: "no back",
+        cols: "columns", drawers: "drawers", shelves: "shelves", doors: "doors",
+        base: { patas: "legs", zocalo: "plinth", flotante: "wall-hung" } },
+};
+
+function diffChips(a, b, lang) {
+  const w = CHIP_WORDS[lang] || CHIP_WORDS.es;
   const out = [];
-  const f = (k, l) => { if (Math.round(a[k]) !== Math.round(b[k])) out.push(`${l} ${mm(b[k])}mm`); };
-  f("width", "ancho"); f("height", "alto"); f("depth", "fondo");
-  if (a.thickness !== b.thickness) out.push(`espesor ${b.thickness}mm`);
-  if (a.material !== b.material) out.push(MATERIALS[b.material].short.toLowerCase());
-  if (a.base !== b.base) out.push(b.base);
-  if (a.back !== b.back) out.push(b.back ? "con trasera" : "sin trasera");
-  if (a.columns.length !== b.columns.length) out.push(`${b.columns.length} columnas`);
+  const f = (k) => { if (Math.round(a[k]) !== Math.round(b[k])) out.push(`${w[k]} ${num(b[k], lang)}mm`); };
+  f("width"); f("height"); f("depth");
+  if (a.thickness !== b.thickness) out.push(`${w.thick} ${b.thickness}mm`);
+  if (a.material !== b.material) out.push(matShort(b.material, lang).toLowerCase());
+  if (a.base !== b.base) out.push(w.base[b.base] || b.base);
+  if (a.back !== b.back) out.push(b.back ? w.back : w.noBack);
+  if (a.columns.length !== b.columns.length) out.push(`${b.columns.length} ${w.cols}`);
   const d = (x) => x.columns.reduce((s, c) => s + c.drawers, 0);
-  if (d(a) !== d(b)) out.push(`${d(b)} cajones`);
+  if (d(a) !== d(b)) out.push(`${d(b)} ${w.drawers}`);
   const s = (x) => x.columns.reduce((n, c) => n + c.shelves.length, 0);
-  if (s(a) !== s(b)) out.push(`${s(b)} baldas`);
+  if (s(a) !== s(b)) out.push(`${s(b)} ${w.shelves}`);
   const dr = (x) => x.columns.filter((c) => c.door).length;
-  if (dr(a) !== dr(b)) out.push(`${dr(b)} puertas`);
+  if (dr(a) !== dr(b)) out.push(`${dr(b)} ${w.doors}`);
   return out;
 }
 
 export default function Configurator() {
+  const [lang, setLang] = useState("es");
+  const L = tr(lang);
+  const mm = (v) => num(v, lang);
   const [params, setParams] = useState(() => normalize(DEFAULT()));
-  const [messages, setMessages] = useState(INTRO);
+  const [messages, setMessages] = useState(() => intro("es"));
   const [busy, setBusy] = useState(false);
   const [selection, setSelection] = useState(null);
   const [founder, setFounder] = useState(false);
@@ -66,6 +84,8 @@ export default function Configurator() {
   const copilot = useRef(null);
   const vp = useRef(null);
   const toastT = useRef(null);
+  /* el chat aún no se ha tocado: al cambiar de idioma se traduce entero */
+  const pristine = useRef(true);
 
   const say = (m) => setMessages((xs) => [...xs, m]);
   const flash = (t) => {
@@ -73,6 +93,30 @@ export default function Configurator() {
     clearTimeout(toastT.current);
     toastT.current = setTimeout(() => setToast(""), 2600);
   };
+
+  /* ---------------- idioma ---------------- */
+  const applyLang = useCallback((next, announce) => {
+    setLang(next);
+    document.documentElement.lang = next;
+    try { localStorage.setItem(LANG_KEY, next); } catch {}
+    if (pristine.current) setMessages(intro(next));
+    else if (announce) setMessages((xs) => [...xs, { role: "sys", text: tr(next).switched }]);
+  }, []);
+
+  /* el título lo fija Next al cargar; se reescribe cada vez que cambia el idioma */
+  useEffect(() => {
+    const title = `Cutwise · ${tr(lang).tagline}`;
+    document.title = title;
+    const t = setTimeout(() => { document.title = title; }, 400);
+    return () => clearTimeout(t);
+  }, [lang]);
+
+  useEffect(() => {
+    let saved = null;
+    try { saved = localStorage.getItem(LANG_KEY); } catch {}
+    const guess = saved || (/^en\b/i.test(navigator.language || "") ? "en" : "es");
+    if (guess !== "es") applyLang(guess, false);
+  }, [applyLang]);
 
   /* onEdit: cambio en curso (arrastre, slider). No entra en el historial. */
   const onEdit = useCallback((next) => setParams(normalize(next)), []);
@@ -110,26 +154,29 @@ export default function Configurator() {
   /* ---------------- chat: capa local, luego servidor ---------------- */
   const send = useCallback(async (msg) => {
     if (busy) return;
-    const fb = () => { const f = fallback(msg); return { role: "ai", text: f.ask, suggest: f.suggest }; };
+    pristine.current = false;
+    const en = lang === "en";
+    const T = tr(lang);
+    const fb = () => { const f = en ? fallbackEN(msg) : fallback(msg); return { role: "ai", text: f.ask, suggest: f.suggest }; };
     say({ role: "you", text: msg });
     const before = deepCopy(params);
     const t0 = performance.now();
 
-    const res = parseIntent(msg, params);
+    const res = en ? parseIntentEN(msg, params) : parseIntent(msg, params);
     /* órdenes sobre el diseño entero: siempre reversibles con «deshaz» */
     if (res?.action === "reset") {
       history.current.push(before);
       setParams(normalize(DEFAULT()));
       setSelection(null);
-      say({ role: "ai", text: "Hecho: he vuelto a la estantería de partida. Si ha sido sin querer, dime «deshaz».", suggest: ["Deshaz"] });
+      say({ role: "ai", text: T.resetDone, suggest: [T.resetChip] });
       return;
     }
     if (res?.action === "undo") {
       const prev = history.current.pop();
-      if (!prev) { say({ role: "ai", text: "Todavía no hay nada que deshacer." }); return; }
+      if (!prev) { say({ role: "ai", text: T.nothingToUndo }); return; }
       setParams(normalize(prev));
       setSelection(null);
-      say({ role: "ai", text: "Deshecho: he vuelto al paso anterior." });
+      say({ role: "ai", text: T.undone });
       return;
     }
     if (res?.ask) { say({ role: "ai", text: res.ask, suggest: res.suggest }); return; }
@@ -138,35 +185,34 @@ export default function Configurator() {
       history.current.push(before);
       setParams(after);
       setSelection(null);
-      const warn = validate(after, build(after)).find((f) => f.lvl === "warn");
+      const warn = validate(after, build(after, lang), lang).find((f) => f.lvl === "warn");
       const bits = [res.changes.join(", ").replace(/^./, (c) => c.toUpperCase()) + "."];
       if (res.notes.length) bits.push(res.notes.join("; ") + ".");
       // Si normalize() corrigió lo pedido, se dice: el mensaje no puede contradecir el resultado.
       const req = res.params;
-      if (req.columns.length !== after.columns.length) {
-        bits.push(`He dejado ${after.columns.length} columnas: ninguna puede pasar de 1,5 m, no hay tablero que aguante esa luz.`);
-      }
-      for (const [k, name, lo, hi] of [["width", "ancho", 400, 3200], ["height", "alto", 400, 2600], ["depth", "fondo", 180, 600]]) {
-        if (Math.abs(Math.round(req[k]) - after[k]) > 10) bits.push(`El ${name} va de ${mm(lo)} a ${mm(hi)} mm: lo he dejado en ${mm(after[k])} mm.`);
+      if (req.columns.length !== after.columns.length) bits.push(T.colsAdjusted(after.columns.length));
+      for (const [k, lo, hi] of [["width", 400, 3200], ["height", 400, 2600], ["depth", 180, 600]]) {
+        if (Math.abs(Math.round(req[k]) - after[k]) > 10) bits.push(T.dimAdjusted(T.dimNames[k], num(lo, lang), num(hi, lang), num(after[k], lang)));
       }
       const reqDr = req.columns.reduce((acc, c) => acc + (c.drawers || 0), 0);
       const aftDr = after.columns.reduce((acc, c) => acc + c.drawers, 0);
-      if (aftDr < reqDr) bits.push(`Con esta altura no caben tantos cajones: he dejado ${aftDr}.`);
-      if (warn) bits.push("Ojo: " + warn.d.replace(/^./, (c) => c.toLowerCase()));
-      say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after),
-            src: (performance.now() - t0).toFixed(1).replace(".", ",") + " ms" });
+      if (aftDr < reqDr) bits.push(T.drawersAdjusted(aftDr));
+      if (warn) bits.push(T.watch + warn.d.replace(/^./, (c) => c.toLowerCase()));
+      const ms = (performance.now() - t0).toFixed(1);
+      say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after, lang),
+            src: (en ? ms : ms.replace(".", ",")) + " ms" });
       return;
     }
 
     if (copilot.current === false) { say(fb()); return; }
 
     setBusy(true);
-    say({ role: "ai", text: "Pensando…", pending: true });
+    say({ role: "ai", text: T.thinking, pending: true });
     try {
       const r = await fetch("/api/design", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, params }),
+        body: JSON.stringify({ message: msg, params, lang }),
       });
       const data = await r.json();
       setMessages((xs) => xs.filter((m) => !m.pending));
@@ -186,39 +232,39 @@ export default function Configurator() {
       history.current.push(before);
       setParams(after);
       setSelection(null);
-      say({ role: "ai", text: data.reply || "Hecho.", chips: diffChips(before, after), src: "server" });
+      say({ role: "ai", text: data.reply || (en ? "Done." : "Hecho."), chips: diffChips(before, after, lang), src: "server" });
     } catch {
       setMessages((xs) => xs.filter((m) => !m.pending));
       say(fb());
     } finally {
       setBusy(false);
     }
-  }, [busy, params]);
+  }, [busy, params, lang]);
 
   const undo = () => {
     const prev = history.current.pop();
-    if (!prev) return flash("Nada que deshacer");
+    if (!prev) return flash(L.undoEmpty);
     setParams(normalize(prev));
     setSelection(null);
   };
 
   const downloadCsv = (rows, q) => {
     const csv = [
-      "Pieza;Unidades;Largo_mm;Ancho_mm;Espesor_mm;Cantos",
-      ...rows.map((r) => `${r.label};${r.qty};${r.L};${r.W};${r.t};${r.edges === 4 ? "4" : r.edges === 1 ? "1 (frontal)" : "0"}`),
+      L.csvHead,
+      ...rows.map((r) => `${r.label};${r.qty};${r.L};${r.W};${r.t};${L.csvEdges[r.edges] ?? "0"}`),
       "",
-      `Material;${MATERIALS[params.material].name} ${params.thickness} mm`,
-      `Tableros;${q.nSheets}`,
-      `Canto ABS m;${q.edgeML.toFixed(1)}`,
-      `Peso kg;${Math.round(q.weight)}`,
+      `${L.csvMat};${matName(params.material, lang)} ${params.thickness} mm`,
+      `${L.csvSheets};${q.nSheets}`,
+      `${L.csvEdge};${q.edgeML.toFixed(1)}`,
+      `${L.csvWeight};${Math.round(q.weight)}`,
     ].join("\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `cutwise-despiece-${mm(params.width)}x${mm(params.height)}.csv`;
+    a.download = `cutwise-${L.csvFile}-${Math.round(params.width)}x${Math.round(params.height)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
-    flash("Despiece descargado");
+    flash(L.csvDone);
   };
 
   /* ---------------- panel flotante de la pieza ---------------- */
@@ -236,9 +282,9 @@ export default function Configurator() {
     };
     return (
       <>
-        <h4>Balda · columna {selection.col + 1}</h4>
+        <h4>{L.shelfOfCol(selection.col + 1)}</h4>
         <div className="selrow">
-          <label>Altura</label>
+          <label>{L.height}</label>
           <input className="numin mono" defaultValue={v} key={v}
                  onBlur={(e) => set(Number(e.target.value))}
                  onKeyDown={(e) => e.key === "Enter" && set(Number(e.target.value))} />
@@ -249,7 +295,7 @@ export default function Configurator() {
           </div>
         </div>
         <div className="selrow">
-          <label>Luz</label>
+          <label>{L.span}</label>
           <span className="mono" style={{ fontSize: 11.5, color: over ? "var(--amber)" : "var(--ink-2)" }}>
             {mm(c.width)} / {mm(maxSpan(params.material, params.thickness))} mm
           </span>
@@ -257,7 +303,7 @@ export default function Configurator() {
             const n = deepCopy(params);
             n.columns[selection.col].shelves.splice(selection.shelf, 1);
             setSelection(null); onCommitEdit(n);
-          }}>Quitar</button>
+          }}>{L.remove}</button>
         </div>
       </>
     );
@@ -269,9 +315,9 @@ export default function Configurator() {
     const total = a.width + b.width;
     return (
       <>
-        <h4>Divisor {selection.div + 1}</h4>
+        <h4>{L.divider(selection.div + 1)}</h4>
         <div className="selrow">
-          <label>Izq.</label>
+          <label>{L.left}</label>
           <input className="numin mono" defaultValue={Math.round(a.width)} key={Math.round(a.width)}
                  onBlur={(e) => {
                    const na = clamp(Math.round(Number(e.target.value) / 10) * 10, 150, total - 150);
@@ -283,7 +329,7 @@ export default function Configurator() {
           <span style={{ fontSize: 11, color: "var(--ink-3)" }}>mm</span>
         </div>
         <div className="selrow">
-          <label>Der.</label>
+          <label>{L.right}</label>
           <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>{mm(b.width)} mm</span>
           <button className="kill" onClick={() => {
             const n = deepCopy(params);
@@ -291,7 +337,7 @@ export default function Configurator() {
             n.columns.splice(selection.div + 1, 1);
             n.columns[selection.div].width = w;
             setSelection(null); onCommitEdit(n);
-          }}>Quitar</button>
+          }}>{L.remove}</button>
         </div>
       </>
     );
@@ -300,25 +346,29 @@ export default function Configurator() {
   return (
     <div className="app">
       <header className="bar">
-        <div className="brand"><b>Cutwise</b><span>Estantería a medida</span></div>
+        <div className="brand"><b>Cutwise</b><span>{L.tagline}</span></div>
         <div className="bar-sep" />
         <div className="bar-note">
           {copilotOn
-            ? <>Copiloto <b>en tu servidor</b></>
-            : <>Motor de diseño <b>en el dispositivo</b></>}
+            ? <>{L.engineServer[0]}<b>{L.engineServer[1]}</b></>
+            : <>{L.engineLocal[0]}<b>{L.engineLocal[1]}</b></>}
         </div>
         <div className="bar-right">
-          <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>Escala 1,70 m</button>
-          <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>Despiece</button>
-          <button className="tbtn photo-btn" aria-pressed={photo} onClick={() => setPhoto((v) => !v)}>Modo foto</button>
-          <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>Modo fundador</button>
-          <button className="tbtn" onClick={undo}>Deshacer</button>
+          <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>{L.scale}</button>
+          <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>{L.exploded}</button>
+          <button className="tbtn photo-btn" aria-pressed={photo} onClick={() => setPhoto((v) => !v)}>{L.photo}</button>
+          <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>{L.founder}</button>
+          <button className="tbtn" onClick={undo}>{L.undo}</button>
+        </div>
+        <div className="lang" role="group" aria-label="Idioma / Language">
+          <button aria-pressed={lang === "es"} lang="es" title="Español" onClick={() => lang !== "es" && applyLang("es", true)}>ES</button>
+          <button aria-pressed={lang === "en"} lang="en" title="English" onClick={() => lang !== "en" && applyLang("en", true)}>EN</button>
         </div>
       </header>
 
       <div className="main">
         <div className={"rail-wrap" + (tab === "chat" ? "" : " hide-sm")}>
-          <Chat messages={messages} busy={busy} onSend={send} />
+          <Chat messages={messages} busy={busy} onSend={send} lang={lang} />
         </div>
 
         <section className="stage">
@@ -335,23 +385,22 @@ export default function Configurator() {
                 {mm(params.width)} × {mm(params.height)} × {mm(params.depth)} mm
               </div>
               <div className="glass pill">
-                <b>{MATERIALS[params.material].name}</b> · {params.thickness} mm
+                <b>{matName(params.material, lang)}</b> · {params.thickness} mm
               </div>
               {photo && (
                 <div className="glass pill mono">
-                  {photoSamples < 3 ? "Modo foto · preparando…" : `Modo foto · ${photoSamples} muestras`}
+                  {photoSamples < 3 ? L.photoPreparing : L.photoSamples(photoSamples)}
                 </div>
               )}
             </div>
             <div className="vp-tr">
-              <button className="glass iconbtn" title="Vista frontal" onClick={() => vp.current?.frame("front")}>▣</button>
-              <button className="glass iconbtn" title="Vista 3/4" onClick={() => vp.current?.frame("34")}>◱</button>
-              <button className="glass iconbtn" title="Vista cenital" onClick={() => vp.current?.frame("top")}>⬒</button>
+              <button className="glass iconbtn" title={L.viewFront} aria-label={L.viewFront} onClick={() => vp.current?.frame("front")}>▣</button>
+              <button className="glass iconbtn" title={L.view34} aria-label={L.view34} onClick={() => vp.current?.frame("34")}>◱</button>
+              <button className="glass iconbtn" title={L.viewTop} aria-label={L.viewTop} onClick={() => vp.current?.frame("top")}>⬒</button>
             </div>
             <div className="vp-bl">
               <div className="glass hint">
-                <b>Arrastra una balda</b> o un divisor para editarla. Girar: arrastrar · Zoom: rueda
-                o pinza, hacia el cursor · Mover: clic derecho o Mayús · Doble clic para enfocar.
+                <b>{L.hintBold}</b>{L.hintRest}
               </div>
             </div>
             {selection && selBox && (
@@ -364,7 +413,7 @@ export default function Configurator() {
 
         <div className={"rail-wrap" + (tab === "spec" ? "" : " hide-sm")}>
           <SpecRail
-            params={params} selection={selection} founder={founder}
+            params={params} selection={selection} founder={founder} lang={lang}
             onEdit={onEdit} onCommitEdit={onCommitEdit}
             onPushHistory={(snap) => { history.current.push(snap); }}
             onOrder={(q, rows, nested) => setModal({ q, rows, nested })}
@@ -374,33 +423,30 @@ export default function Configurator() {
         </div>
 
         <div className="tabs">
-          <button aria-pressed={tab === "chat"} onClick={() => setTab("chat")}>Copiloto</button>
-          <button aria-pressed={tab === "spec"} onClick={() => setTab("spec")}>Diseño y precio</button>
+          <button aria-pressed={tab === "chat"} onClick={() => setTab("chat")}>{L.tabChat}</button>
+          <button aria-pressed={tab === "spec"} onClick={() => setTab("spec")}>{L.tabSpec}</button>
         </div>
       </div>
 
       {modal && (
         <div className="veil on" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <div className="modal">
-            <h3>Listo para control numérico</h3>
-            <p>Esto es lo que sale del configurador hacia el taller. Ni un paso manual entre el render y la máquina.</p>
+            <h3>{L.modalTitle}</h3>
+            <p>{L.modalText}</p>
             {[
-              ["Referencia", `CWS-${Date.now().toString(36).slice(-6).toUpperCase()}`],
-              ["Medidas", `${mm(params.width)}×${mm(params.height)}×${mm(params.depth)}`],
-              ["Material", `${MATERIALS[params.material].name} ${params.thickness} mm`],
-              ["Piezas de tablero", modal.rows.reduce((a, r) => a + r.qty, 0)],
-              ["Tableros / aprovechamiento", `${modal.q.nSheets} · ${Math.round(
+              [L.ref, `CWS-${Date.now().toString(36).slice(-6).toUpperCase()}`],
+              [L.dims, `${mm(params.width)}×${mm(params.height)}×${mm(params.depth)}`],
+              [L.material, `${matName(params.material, lang)} ${params.thickness} mm`],
+              [L.boardPieces, modal.rows.reduce((a, r) => a + r.qty, 0)],
+              [L.sheetsYield, `${modal.q.nSheets} · ${Math.round(
                 (modal.nested.yield.reduce((a, b) => a + b, 0) / Math.max(1, modal.nested.yield.length)) * 100)}%`],
-              ["Canto ABS", `${modal.q.edgeML.toFixed(1)} m`],
-              ["Peso de envío", `${Math.round(modal.q.weight)} kg`],
+              [L.edgeBanding, `${modal.q.edgeML.toFixed(1)} m`],
+              [L.shipWeight, `${Math.round(modal.q.weight)} kg`],
             ].map(([k, v]) => (
               <div className="ordrow" key={k}><span>{k}</span><span>{v}</span></div>
             ))}
-            <p style={{ margin: "16px 0 0", fontSize: 12, color: "var(--ink-3)" }}>
-              Producto fabricado según especificaciones del comprador: exento del derecho de
-              desistimiento (RDL 1/2007, art. 103.c). Prototipo de demostración — no se cobra nada.
-            </p>
-            <button className="cta" style={{ marginTop: 16 }} onClick={() => setModal(null)}>Cerrar</button>
+            <p style={{ margin: "16px 0 0", fontSize: 12, color: "var(--ink-3)" }}>{L.legalNote}</p>
+            <button className="cta" style={{ marginTop: 16 }} onClick={() => setModal(null)}>{L.close}</button>
           </div>
         </div>
       )}

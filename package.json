@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node tests/qa.mjs && node tests/chat.mjs"
+    "test": "node tests/qa.mjs && node tests/chat.mjs && node tests/chat-en.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

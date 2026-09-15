@@ -1,14 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { tr } from "@/lib/i18n";
 
-const SEEDS = [
-  "Que quepa en un hueco de 2,10 m",
-  "Prepárala para vinilos",
-  "No quiero que tenga fondo",
-  "Dos cajones abajo a la izquierda",
-];
-
-export default function Chat({ messages, busy, onSend }) {
+export default function Chat({ messages, busy, onSend, lang = "es" }) {
+  const L = tr(lang);
   const [text, setText] = useState("");
   const scrollRef = useRef(null);
   const taRef = useRef(null);
@@ -31,7 +26,7 @@ export default function Chat({ messages, busy, onSend }) {
     <aside className="rail left">
       <div className="rail-head">
         <span className="dot" />
-        <h2>Copiloto</h2>
+        <h2>{L.copilot}</h2>
       </div>
 
       <div className="scroll" ref={scrollRef}>
@@ -43,7 +38,7 @@ export default function Chat({ messages, busy, onSend }) {
               <div className="msg sys" key={i}>{m.text}</div>
             ) : (
               <div className="msg ai" key={i}>
-                <span className="av">T</span>
+                <span className="av">C</span>
                 <div className="txt">
                   {m.text}
                   {m.chips?.length > 0 && (
@@ -54,8 +49,8 @@ export default function Chat({ messages, busy, onSend }) {
                   {m.src && (
                     <span className="src">
                       {m.src === "server"
-                        ? <>Resuelto por el <b>copiloto</b></>
-                        : <>Resuelto <b>en el navegador</b> · {m.src}</>}
+                        ? <>{L.resolvedServer[0]}<b>{L.resolvedServer[1]}</b></>
+                        : <>{L.resolvedLocal[0]}<b>{L.resolvedLocal[1]}</b> · {m.src}</>}
                     </span>
                   )}
                   {m.suggest?.length > 0 && (
@@ -72,7 +67,7 @@ export default function Chat({ messages, busy, onSend }) {
       </div>
 
       <div className="chips">
-        {SEEDS.map((s) => (
+        {L.seeds.map((s) => (
           <button className="chip" key={s} onClick={() => onSend(s)} disabled={busy}>
             {s}
           </button>
@@ -85,7 +80,7 @@ export default function Chat({ messages, busy, onSend }) {
             ref={taRef}
             rows={1}
             value={text}
-            placeholder="Dime qué quieres cambiar…"
+            placeholder={L.placeholder}
             onChange={(e) => {
               setText(e.target.value);
               e.target.style.height = "auto";
@@ -96,7 +91,7 @@ export default function Chat({ messages, busy, onSend }) {
             }}
           />
           <button className="send" type="submit" disabled={busy || !text.trim()}>
-            Enviar
+            {L.send}
           </button>
         </form>
       </div>

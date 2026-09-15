@@ -121,7 +121,9 @@ export async function POST(req) {
     const res = await client.messages.parse({
       model: "claude-opus-5",
       max_tokens: 16000,
-      system: systemPrompt(current),
+      system: systemPrompt(current) + (body?.lang === "en"
+        ? "\n\nEl cliente escribe en inglés: el campo reply va en inglés, con cifras al estilo inglés (1,800 mm; €1,200)."
+        : ""),
       messages: [{ role: "user", content: message }],
       output_config: {
         format: zodOutputFormat(DesignSchema),

@@ -5,7 +5,8 @@ import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, DRAWER_H,
   maxSpan, validate, addColumn, redistribute, setShelfCount, deepCopy, build,
 } from "@/lib/model";
-import { cutlist, nest, quote, PRICE, mm, eur, eur2 } from "@/lib/pricing";
+import { cutlist, nest, quote, PRICE } from "@/lib/pricing";
+import { tr, num, money, matShort } from "@/lib/i18n";
 
 /* Campo numérico con borrador propio: se escribe libremente y el valor solo
    se aplica al pulsar Intro o salir del campo (Esc cancela). Antes, cada
@@ -49,10 +50,14 @@ function Seg({ options, value, onPick }) {
 }
 
 export default function SpecRail({
-  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset,
+  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset, lang = "es",
 }) {
+  const L = tr(lang);
   const p = params;
   const t = p.thickness;
+  const n = (v) => num(v, lang);
+  const eur = (v) => money(v, lang, 0);
+  const eur2 = (v) => money(v, lang, 2);
 
   /* las fichas enseñan la misma madera que el 3D, no un degradado */
   const [swatch, setSwatch] = useState({});
@@ -61,26 +66,26 @@ export default function SpecRail({
                 abedul: woodSwatchURL("abedul") });
   }, []);
 
-  const { geo, rows, nested, q, flags, span } = useMemo(() => {
-    const geo = build(p);
+  const { rows, nested, q, flags, span } = useMemo(() => {
+    const geo = build(p, lang);
     const rows = cutlist(geo);
     const nested = nest(rows);
     return {
-      geo, rows, nested,
+      rows, nested,
       q: quote(p, geo, nested),
-      flags: validate(p, geo),
+      flags: validate(p, geo, lang),
       span: maxSpan(p.material, t),
     };
-  }, [p, t]);
+  }, [p, t, lang]);
 
-  const edit = (fn) => { const n = deepCopy(p); fn(n); onCommitEdit(n); };
+  const edit = (fn) => { const next = deepCopy(p); fn(next); onCommitEdit(next); };
   /* deslizadores: se guarda el estado de ANTES al pulsar y se apila al soltar,
      para que «Deshacer» vuelva al valor previo al arrastre */
   const snap = useRef(null);
   const grab = () => { if (!snap.current) snap.current = deepCopy(p); };
   const release = () => { if (snap.current) { onPushHistory(snap.current); snap.current = null; } };
   const maxDrawers = Math.min(4, Math.max(0, Math.floor((p.height - p.baseHeight - 2 * p.thickness) / DRAWER_H)));
-  const live = (fn) => { const n = deepCopy(p); fn(n); onEdit(n); };
+  const live = (fn) => { const next = deepCopy(p); fn(next); onEdit(next); };
 
   const pieces = rows.reduce((a, r) => a + r.qty, 0);
   const avgYield = nested.yield.length
@@ -90,71 +95,71 @@ export default function SpecRail({
     <aside className="rail right">
       <div className="scroll">
         <section className="sec">
-          <h3>Medidas
+          <h3>{L.measures}
             <em className="mono">
-              {p.columns.length} col · {p.columns.reduce((a, c) => a + c.shelves.length, 0)} baldas
+              {L.colsShelves(p.columns.length, p.columns.reduce((a, c) => a + c.shelves.length, 0))}
             </em>
           </h3>
-          {[["Ancho", "width", 400, 3200], ["Alto", "height", 400, 2600], ["Fondo", "depth", 180, 600]]
+          {[[L.width, "width", 400, 3200], [L.heightL, "height", 400, 2600], [L.depth, "depth", 180, 600]]
             .map(([label, key, min, max]) => (
               <div className="f" key={key}>
                 <label htmlFor={key}>{label}</label>
                 <input id={key} type="range" min={min} max={max} step={10} value={p[key]}
                        onPointerDown={grab} onKeyDown={grab}
-                       onChange={(e) => live((n) => { n[key] = Number(e.target.value); })}
+                       onChange={(e) => live((x) => { x[key] = Number(e.target.value); })}
                        onPointerUp={release} onKeyUp={release} onBlur={release} />
-                <NumField value={p[key]} onCommit={(v) => edit((n) => { n[key] = v; })} />
+                <NumField value={p[key]} onCommit={(v) => edit((x) => { x[key] = v; })} />
               </div>
             ))}
         </section>
 
         <section className="sec">
-          <h3>Material</h3>
+          <h3>{L.materialH}</h3>
           <div className="swatches">
             {MATKEYS.map((k) => {
               const M = MATERIALS[k];
               const hex = "#" + M.hex.toString(16).padStart(6, "0");
               return (
                 <button className="sw" key={k} aria-pressed={p.material === k}
-                        onClick={() => edit((n) => { n.material = k; })}>
+                        onClick={() => edit((x) => { x.material = k; })}>
                   <div className="pat" style={{
                     backgroundColor: hex,
                     backgroundImage: swatch[k] ? `url(${swatch[k]})` : undefined,
                     backgroundSize: "cover",
                   }} />
-                  <small>{M.short}</small>
+                  <small>{matShort(k, lang)}</small>
                 </button>
               );
             })}
           </div>
           <div className="f" style={{ marginTop: 10 }}>
-            <label>Espesor</label>
+            <label>{L.thickness}</label>
             <Seg value={t} options={THICKNESSES.map((v) => [v, `${v} mm`])}
-                 onPick={(v) => edit((n) => { n.thickness = Number(v); })} />
+                 onPick={(v) => edit((x) => { x.thickness = Number(v); })} />
           </div>
           <div className="f">
-            <label>Base</label>
+            <label>{L.base}</label>
             <Seg value={p.base}
-                 options={[["patas", "Patas"], ["zocalo", "Zócalo"], ["flotante", "Suspendido"]]}
-                 onPick={(v) => edit((n) => {
-                   n.base = v;
-                   n.baseHeight = v === "patas" ? 110 : v === "zocalo" ? 80 : 0;
+                 options={[["patas", L.baseOpts.patas], ["zocalo", L.baseOpts.zocalo], ["flotante", L.baseOpts.flotante]]}
+                 onPick={(v) => edit((x) => {
+                   x.base = v;
+                   x.baseHeight = v === "patas" ? 110 : v === "zocalo" ? 80 : 0;
                  })} />
           </div>
           <div className="f">
-            <label>Trasera</label>
-            <Seg value={p.back} options={[[true, "Con trasera"], [false, "Sin trasera"]]}
-                 onPick={(v) => edit((n) => { n.back = v === true || v === "true"; })} />
+            <label>{L.back}</label>
+            <Seg value={p.back} options={[[true, L.withBack], [false, L.noBack]]}
+                 onPick={(v) => edit((x) => { x.back = v === true || v === "true"; })} />
           </div>
         </section>
 
         <section className="sec">
-          <h3>Columnas
+          <h3>{L.columns}
             <em>
-              <button className="mini" onClick={() => edit((n) => {
-                redistribute(n);
-                n.columns.forEach((c) => setShelfCount(n, c, c.shelves.length || 3));
-              })}>Repartir</button>
+              <button className="mini" onClick={() => edit((x) => {
+                redistribute(x);
+                x.columns.forEach((c) => setShelfCount(x, c, c.shelves.length || 3));
+              })}>{L.even}</button>
             </em>
           </h3>
           <div className="cols">
@@ -167,25 +172,25 @@ export default function SpecRail({
                 <div className={"col" + (sel ? " sel" : "")} key={i}>
                   <span className="n">{i + 1}</span>
                   <span className="w" style={over ? { color: "var(--amber)", fontWeight: 600 } : undefined}>
-                    {mm(c.width)}
+                    {n(c.width)}
                   </span>
                   <span className="meta">
-                    {c.shelves.length} baldas
-                    {c.drawers ? ` · ${c.drawers} cajones` : ""}
-                    {c.door ? " · puerta" : ""}
+                    {L.shelvesN(c.shelves.length)}
+                    {c.drawers ? ` · ${L.drawersN(c.drawers)}` : ""}
+                    {c.door ? ` · ${L.withDoor}` : ""}
                   </span>
                   <div className="acts">
-                    <button className="mini" disabled={!c.shelves.length} title="Quitar una balda"
-                      onClick={() => edit((n) => setShelfCount(n, n.columns[i], c.shelves.length - 1))}>−balda</button>
-                    <button className="mini" title="Añadir una balda"
-                      onClick={() => edit((n) => setShelfCount(n, n.columns[i], c.shelves.length + 1))}>+balda</button>
-                    <button className="mini" disabled={!c.drawers} title="Quitar un cajón"
-                      onClick={() => edit((n) => { n.columns[i].drawers = c.drawers - 1; })}>−cajón</button>
-                    <button className="mini" disabled={c.drawers >= maxDrawers} title="Añadir un cajón"
-                      onClick={() => edit((n) => { n.columns[i].drawers = c.drawers + 1; })}>+cajón</button>
+                    <button className="mini" disabled={!c.shelves.length} title={L.tMinusShelf}
+                      onClick={() => edit((x) => setShelfCount(x, x.columns[i], c.shelves.length - 1))}>{L.minusShelf}</button>
+                    <button className="mini" title={L.tPlusShelf}
+                      onClick={() => edit((x) => setShelfCount(x, x.columns[i], c.shelves.length + 1))}>{L.plusShelf}</button>
+                    <button className="mini" disabled={!c.drawers} title={L.tMinusDrawer}
+                      onClick={() => edit((x) => { x.columns[i].drawers = c.drawers - 1; })}>{L.minusDrawer}</button>
+                    <button className="mini" disabled={c.drawers >= maxDrawers} title={L.tPlusDrawer}
+                      onClick={() => edit((x) => { x.columns[i].drawers = c.drawers + 1; })}>{L.plusDrawer}</button>
                     <button className="mini"
-                      onClick={() => edit((n) => { n.columns[i].door = !c.door; })}>
-                      {c.door ? "−puerta" : "+puerta"}
+                      onClick={() => edit((x) => { x.columns[i].door = !c.door; })}>
+                      {c.door ? L.minusDoor : L.plusDoor}
                     </button>
                   </div>
                 </div>
@@ -194,19 +199,19 @@ export default function SpecRail({
           </div>
           <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
             <button className="mini" style={{ flex: 1, padding: 5 }}
-                    onClick={() => edit((n) => { addColumn(n); redistribute(n); })}>+ Columna</button>
+                    onClick={() => edit((x) => { addColumn(x); redistribute(x); })}>{L.addCol}</button>
             <button className="mini" style={{ flex: 1, padding: 5 }}
-                    onClick={() => edit((n) => {
-                      if (n.columns.length < 2) return;
-                      const w = Math.min(...n.columns.map((c) => c.width));
-                      n.columns.splice(n.columns.findIndex((c) => c.width === w), 1);
-                      redistribute(n);
-                    })}>− Columna</button>
+                    onClick={() => edit((x) => {
+                      if (x.columns.length < 2) return;
+                      const w = Math.min(...x.columns.map((c) => c.width));
+                      x.columns.splice(x.columns.findIndex((c) => c.width === w), 1);
+                      redistribute(x);
+                    })}>{L.delCol}</button>
           </div>
         </section>
 
         <section className="sec">
-          <h3>Verificación de fabricación</h3>
+          <h3>{L.checks}</h3>
           <div className="flags">
             {flags.map((f, i) => (
               <div className={"flag " + f.lvl} key={i}>
@@ -214,8 +219,8 @@ export default function SpecRail({
                 <div>
                   <b>{f.t}</b><br />{f.d}
                   {f.fix === "addColumn" && (
-                    <><br /><button onClick={() => edit((n) => { addColumn(n); redistribute(n); })}>
-                      Añadir divisor
+                    <><br /><button onClick={() => edit((x) => { addColumn(x); redistribute(x); })}>
+                      {L.addDivider}
                     </button></>
                   )}
                 </div>
@@ -225,15 +230,15 @@ export default function SpecRail({
         </section>
 
         <section className="sec">
-          <h3>Ficha técnica</h3>
+          <h3>{L.datasheet}</h3>
           <dl className="stats">
             {[
-              ["Superficie de tablero", `${q.panelM2.toFixed(2)}`, "m²"],
-              ["Peso montado", `${Math.round(q.weight)}`, "kg"],
-              ["Canto aplicado", `${q.edgeML.toFixed(1)}`, "m"],
-              ["Luz máx. admisible", mm(span), "mm"],
-              ["Herrajes", `${q.hw.minifix + q.hw.pins + q.hw.hinges + q.hw.runners * 2}`, "ud"],
-              ["Plazo estimado", "12–16", "días"],
+              [L.st.area, q.panelM2.toFixed(2), L.units.m2],
+              [L.st.weight, `${Math.round(q.weight)}`, L.units.kg],
+              [L.st.edge, q.edgeML.toFixed(1), L.units.m],
+              [L.st.span, n(span), L.units.mm],
+              [L.st.hw, `${q.hw.minifix + q.hw.pins + q.hw.hinges + q.hw.runners * 2}`, L.units.ud],
+              [L.st.lead, "12–16", L.units.days],
             ].map(([k, v, u]) => (
               <div className="stat" key={k}>
                 <dt>{k}</dt><dd>{v} <small>{u}</small></dd>
@@ -243,12 +248,12 @@ export default function SpecRail({
         </section>
 
         <section className="sec">
-          <h3>Despiece <em className="mono">{pieces} piezas</em></h3>
+          <h3>{L.cutlist} <em className="mono">{L.piecesN(pieces)}</em></h3>
           <div className="tblwrap">
             <table className="cut">
               <thead>
-                <tr><th>Pieza</th><th className="r">Ud</th><th className="r">Largo</th>
-                    <th className="r">Ancho</th><th className="r">Canto</th></tr>
+                <tr><th>{L.th.piece}</th><th className="r">{L.th.qty}</th><th className="r">{L.th.len}</th>
+                    <th className="r">{L.th.wid}</th><th className="r">{L.th.edge}</th></tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => (
@@ -264,16 +269,14 @@ export default function SpecRail({
         </section>
 
         <section className="sec">
-          <h3>Plan de corte
-            <em className="mono">
-              {nested.sheets.length} tablero{nested.sheets.length !== 1 ? "s" : ""} · {Math.round(avgYield * 100)}% aprov.
-            </em>
+          <h3>{L.cutplan}
+            <em className="mono">{L.sheetsYieldShort(nested.sheets.length, Math.round(avgYield * 100))}</em>
           </h3>
           <div className="sheets">
             {nested.sheets.map((sh, i) => (
               <figure className="sheet-wrap" key={i}>
                 <figcaption>
-                  <span>Tablero {i + 1} · {SHEET.L}×{SHEET.W}×{t}</span>
+                  <span>{L.sheetN(i + 1)} · {SHEET.L}×{SHEET.W}×{t}</span>
                   <span>{Math.round(nested.yield[i] * 100)}%</span>
                 </figcaption>
                 <svg viewBox={`0 0 ${SHEET.L} ${SHEET.W}`} preserveAspectRatio="xMidYMid meet">
@@ -291,6 +294,7 @@ export default function SpecRail({
                 </svg>
               </figure>
             ))}
+            {!nested.sheets.length && <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>{L.noSheets}</p>}
           </div>
         </section>
       </div>
@@ -298,32 +302,31 @@ export default function SpecRail({
       <div className="sec price">
         <div className="pr-main">
           <span className="v">{eur(q.gross)}</span>
-          <span className="u">IVA incl. · envío peninsular</span>
+          <span className="u">{L.priceNote}</span>
         </div>
         <div className="pr-sub">
-          {pieces} piezas · {nested.sheets.length} tablero{nested.sheets.length !== 1 ? "s" : ""} de{" "}
-          {MATERIALS[p.material].short} · montaje en 40–60 min
+          {L.priceSub(pieces, nested.sheets.length, matShort(p.material, lang))}
         </div>
 
         {founder && (
           <div className="founder on">
-            <h5>Unidad económica</h5>
+            <h5>{L.unitEco}</h5>
             {Object.entries(q.c).map(([k, v]) => (
-              <div className="fr" key={k}><span>{k}</span><span>{eur2(v)}</span></div>
+              <div className="fr" key={k}><span>{L.costs[k] || k}</span><span>{eur2(v)}</span></div>
             ))}
-            <div className="fr"><span>Envío</span><span>{eur2(PRICE.ship)}</span></div>
-            <div className="fr tot"><span>Coste directo</span><span>{eur2(q.cost + PRICE.ship)}</span></div>
+            <div className="fr"><span>{L.shipping}</span><span>{eur2(PRICE.ship)}</span></div>
+            <div className="fr tot"><span>{L.directCost}</span><span>{eur2(q.cost + PRICE.ship)}</span></div>
             <div className="fr tot">
-              <span>Margen bruto</span>
+              <span>{L.grossMargin}</span>
               <span>{Math.round(q.margin * 100)}% · {eur2(q.net - PRICE.ship - q.cost)}</span>
             </div>
           </div>
         )}
 
-        <button className="cta" onClick={() => onOrder(q, rows, nested)}>Enviar a fabricación</button>
+        <button className="cta" onClick={() => onOrder(q, rows, nested)}>{L.order}</button>
         <div className="cta-sub">
-          <button onClick={() => onCsv(rows, q)}>Descargar despiece</button>
-          <button onClick={onReset}>Empezar de cero</button>
+          <button onClick={() => onCsv(rows, q)}>{L.csv}</button>
+          <button onClick={onReset}>{L.reset}</button>
         </div>
       </div>
     </aside>
