@@ -87,7 +87,7 @@ export default function Configurator() {
   /* el chat aún no se ha tocado: al cambiar de idioma se traduce entero */
   const pristine = useRef(true);
   /* de qué se habló en el último cambio: «en todas» se refiere a eso */
-  const topic = useRef(null);
+  const convo = useRef({});
 
   const say = (m) => setMessages((xs) => [...xs, m]);
   const flash = (t) => {
@@ -164,11 +164,11 @@ export default function Configurator() {
     const before = deepCopy(params);
     const t0 = performance.now();
 
-    const ctx = { topic: topic.current };
+    const ctx = convo.current;
     const res = en ? parseIntentEN(msg, params, ctx) : parseIntent(msg, params, ctx);
     /* órdenes sobre el diseño entero: siempre reversibles con «deshaz» */
     if (res?.action === "reset") {
-      topic.current = null;
+      convo.current = {};
       history.current.push(before);
       setParams(normalize(DEFAULT()));
       setSelection(null);
@@ -186,7 +186,7 @@ export default function Configurator() {
     if (res?.ask) { say({ role: "ai", text: res.ask, suggest: res.suggest }); return; }
     if (res) {
       const after = normalize(res.params);
-      topic.current = res.topic || null;
+      convo.current = { topic: res.topic, cols: res.cols, last: res.last };
       history.current.push(before);
       setParams(after);
       setSelection(null);
