@@ -2,9 +2,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
-  MATERIALS, MATKEYS, THICKNESSES, SHEET, DRAWER_H,
-  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build,
+  MATERIALS, MATKEYS, THICKNESSES, SHEET, MIN_FRONT, PRESET_KEYS,
+  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build, isRail, cellClear,
 } from "@/lib/model";
+
+/* Dibujo de cada tipo de mueble, en línea: se lee de un vistazo */
+function PresetIcon({ k }) {
+  const box = (x, y, w, h, extra = "") => <rect x={x} y={y} width={w} height={h} rx="1" {...(extra ? { className: extra } : {})} />;
+  const g = {
+    estanteria: <>{box(6, 4, 36, 32)}<path d="M18 4v32M30 4v32M6 15h36M6 26h36" /></>,
+    libreria: <>{box(6, 4, 36, 32)}<path d="M18 4v32M30 4v32M6 15h36M6 26h36" />{box(7, 27, 10, 8, "fill")}{box(19, 27, 10, 8, "fill")}{box(31, 27, 10, 8, "fill")}</>,
+    armario: <>{box(10, 2, 28, 36)}<path d="M24 2v36M10 9h28" /><path d="M14 13h7" className="thin" /><circle cx="22" cy="24" r="0.9" /><circle cx="26" cy="24" r="0.9" /></>,
+    aparador: <>{box(4, 14, 40, 18)}<path d="M17 14v18M31 14v18M17 20h14M17 26h14M8 38l1-6M40 38l-1-6" /></>,
+    tv: <>{box(4, 20, 40, 12)}<path d="M15 20v12M33 20v12M8 36l1-4M40 36l-1-4" />{box(16, 4, 16, 11)}</>,
+    comoda: <>{box(10, 8, 28, 26)}<path d="M24 8v26M10 16.5h28M10 25h28M13 38l1-4M35 38l-1-4" /></>,
+  };
+  return <svg viewBox="0 0 48 40" width="42" height="35" aria-hidden="true" className="picon">{g[k]}</svg>;
+}
 import { cutlist, nest, quote, PRICE } from "@/lib/pricing";
 import { tr, num, money, matShort } from "@/lib/i18n";
 
@@ -50,7 +64,7 @@ function Seg({ options, value, onPick }) {
 }
 
 export default function SpecRail({
-  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset, lang = "es",
+  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset, onPreset, lang = "es",
 }) {
   const L = tr(lang);
   const p = params;
@@ -84,7 +98,8 @@ export default function SpecRail({
   const snap = useRef(null);
   const grab = () => { if (!snap.current) snap.current = deepCopy(p); };
   const release = () => { if (snap.current) { onPushHistory(snap.current); snap.current = null; } };
-  const maxDrawers = Math.min(4, Math.max(0, Math.floor((p.height - p.baseHeight - 2 * p.thickness) / DRAWER_H)));
+  /* cuántos cajones caben en la columna: hasta 3 por hueco, según su altura */
+  const drawerCap = (c) => c.cells.reduce((a, x, j) => a + (isRail(x) ? 0 : Math.min(3, Math.floor(cellClear(p, c, j) / MIN_FRONT))), 0);
   const live = (fn) => { const next = deepCopy(p); fn(next); onEdit(next); };
 
   const pieces = rows.reduce((a, r) => a + r.qty, 0);
@@ -94,6 +109,18 @@ export default function SpecRail({
   return (
     <aside className="rail right">
       <div className="scroll">
+        <section className="sec">
+          <h3>{L.presetsH}</h3>
+          <div className="presets">
+            {PRESET_KEYS.map((k) => (
+              <button key={k} className="preset" onClick={() => onPreset?.(k)}>
+                <PresetIcon k={k} />
+                <span>{L.presets[k]}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
         <section className="sec">
           <h3>{L.measures}
             <em className="mono">
@@ -178,6 +205,7 @@ export default function SpecRail({
                     {L.shelvesN(c.shelves.length)}
                     {c.drawers ? ` · ${L.drawersN(c.drawers)}` : ""}
                     {c.door ? ` · ${L.withDoor}` : ""}
+                    {c.cells.some(isRail) ? ` · ${L.withRail}` : ""}
                   </span>
                   <div className="acts">
                     <button className="mini" disabled={!c.shelves.length} title={L.tMinusShelf}
@@ -186,7 +214,7 @@ export default function SpecRail({
                       onClick={() => edit((x) => setShelfCount(x, x.columns[i], c.shelves.length + 1))}>{L.plusShelf}</button>
                     <button className="mini" disabled={!c.drawers} title={L.tMinusDrawer}
                       onClick={() => edit((x) => setDrawers(x, x.columns[i], c.drawers - 1))}>{L.minusDrawer}</button>
-                    <button className="mini" disabled={c.drawers >= maxDrawers} title={L.tPlusDrawer}
+                    <button className="mini" disabled={c.drawers >= drawerCap(c)} title={L.tPlusDrawer}
                       onClick={() => edit((x) => setDrawers(x, x.columns[i], c.drawers + 1))}>{L.plusDrawer}</button>
                     <button className="mini"
                       onClick={() => edit((x) => { x.columns[i].door = !c.door; })}>
@@ -218,6 +246,9 @@ export default function SpecRail({
                 <span className="ic">{f.lvl === "warn" ? "▲" : "●"}</span>
                 <div>
                   <b>{f.t}</b><br />{f.d}
+                  {f.fix === "hangDepth" && (
+                    <><br /><button onClick={() => edit((x) => { x.depth = 580; })}>{L.fixDepth}</button></>
+                  )}
                   {f.fix === "addColumn" && (
                     <><br /><button onClick={() => edit((x) => { addColumn(x); redistribute(x); })}>
                       {L.addDivider}

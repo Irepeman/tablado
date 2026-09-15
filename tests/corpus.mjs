@@ -55,6 +55,9 @@ const honest = (re) => ({ r, txt }) => !!r && !GENERIC.test(txt) && re.test(txt)
 const ans = (re) => ({ r }) => !!r && !!r.ask && !GENERIC.test(r.ask) && re.test(r.ask);
 const drw = (...ks) => ({ a }) => ks.every((k, i) => col(a, i).drawers === k);
 const doors = (...ds) => ({ a }) => ds.every((d, i) => col(a, i).door === d);
+const nd = (x) => (x === "drawer" ? 1 : x === "drawer2" ? 2 : x === "drawer3" ? 3 : 0);
+const lastCell = (c) => c.cells[c.cells.length - 1];
+const hasRail = ({ a }) => a.depth >= 580 && a.columns.some((c) => c.cells.some((x) => x.startsWith("rail")));
 
 /* =================== ESPAÑOL =================== */
 /* medidas, como se dicen */
@@ -110,7 +113,7 @@ es("cajones en todas excepto la última", drw(2, 2, 2, 0));
 es("kiero 3 cajones", ({ a }) => col(a, 0).drawers === 3);
 es("ponle 2 cajones xfa", ({ a }) => col(a, 0).drawers === 2);
 es("dos cajones en el segundo cuadro", drw(0, 2, 0, 0));
-es("cajones más grandes", honest(/190|misma altura|altura fija/));
+es("cajones más grandes", ({ a }) => col(a, 0).drawers === 2 && col(a, 0).shelves[0] > 430, (p) => { p.columns[0].drawers = 2; });
 es("¿los cajones tienen cierre suave?", ans(/guía/));
 /* puertas */
 es("puertas en las del centro", doors(false, true, true, false));
@@ -119,7 +122,7 @@ es("que la mitad tenga puertas", doors(true, false, true, false));
 es("puerta en la segunda", doors(false, true, false, false));
 es("quita las puertas", ({ a }) => all(a, (c) => !c.door), (p) => p.columns.forEach((c) => { c.door = true; }));
 es("puertas correderas", honest(/abatible/));
-es("puertas solo abajo", honest(/toda la altura|cubren/));
+es("puertas solo abajo", ({ a }) => all(a, (c) => c.cells[0] === "door" && lastCell(c) !== "door"));
 /* acabados */
 es("color madera", ({ a }) => a.material === "roble", (p) => { p.material = "melamina_blanca"; });
 es("blanco roto", ({ a }) => a.material === "melamina_blanca");
@@ -145,7 +148,7 @@ es("para dvds", ({ a }) => a.depth === 200);
 es("para el baño", ({ a }) => a.material === "melamina_blanca");
 es("para el garaje", ({ a }) => a.thickness === 22);
 es("para separar ambientes", ({ a }) => a.back === false);
-es("quiero un armario", honest(/colgar|barra/));
+es("quiero un armario", hasRail);
 es("una mesita de noche", ({ a }) => a.width <= 500 && a.height <= 600 && a.columns.length === 1 && col(a, 0).drawers >= 1);
 es("un aparador", ({ a }) => a.height <= 900 && all(a, (c) => c.door));
 es("para una tele de 55 pulgadas", ({ a }) => a.width >= 1400 && a.height <= 600);
@@ -188,7 +191,22 @@ es(["Estilo nórdico", "pero en blanco"], ({ a }) => a.material === "melamina_bl
 es(["pon puertas en la segunda", "y en la cuarta"], doors(false, true, false, true));
 es(["una balda más en la primera", "otra"], ({ a }) => col(a, 0).shelves.length === 5 && col(a, 1).shelves.length === 3);
 
+/* filas, armario y barra de colgar */
+es("cajones en los cuadrados de abajo", ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1 && c.shelves[0] === 430));
+es("tres cajones en la fila de abajo", ({ a }) => all(a, (c) => c.cells[0] === "drawer3"));
+es("puertas en la fila de arriba", ({ a }) => all(a, (c) => lastCell(c) === "door" && c.cells[0] !== "door"));
+es("los huecos de abajo con puertas", ({ a }) => all(a, (c) => c.cells[0] === "door"));
+es("pon una barra de colgar", hasRail);
+es("para colgar ropa", hasRail);
+es("quita la barra", ({ a }) => a.columns.every((c) => !c.cells.some((x) => x.startsWith("rail"))), (p) => { p.columns[0].cells = ["rail", "open"]; p.columns[0].shelves = [1500]; });
+es("un armario blanco de 2 metros", ({ a }) => a.material === "melamina_blanca" && a.width === 2000 && a.depth >= 580);
+es(["quiero cajones", "en los cuadrados de abajo"], ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1));
+
 /* =================== ENGLISH =================== */
+en("drawers in the bottom row", ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1));
+en("doors on the top row", ({ a }) => all(a, (c) => lastCell(c) === "door" && c.cells[0] !== "door"));
+en("add a clothes rail", hasRail);
+en("bigger drawers", ({ a }) => col(a, 0).shelves[0] > 430, (p) => { p.columns[0].drawers = 2; });
 en("make it 1.5 m wide", ({ a }) => a.width === 1500);
 en("40 cm deep", ({ a }) => a.depth === 400);
 en("fit it under the window, 90 cm", ({ a, b }) => a.height <= 900 && a.height >= 850 && a.width === b.width);
@@ -218,7 +236,7 @@ en("for DVDs", ({ a }) => a.depth === 200);
 en("for the bathroom", ({ a }) => a.material === "melamina_blanca");
 en("for the garage", ({ a }) => a.thickness === 22);
 en("a room divider", ({ a }) => a.back === false);
-en("a wardrobe", honest(/hang|rail/));
+en("a wardrobe", hasRail);
 en("a bedside table", ({ a }) => a.width <= 500 && a.height <= 600 && a.columns.length === 1);
 en("a sideboard", ({ a }) => a.height <= 900 && all(a, (c) => c.door));
 en("for a 55 inch TV", ({ a }) => a.width >= 1400 && a.height <= 600);

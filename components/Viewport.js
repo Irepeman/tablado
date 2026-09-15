@@ -22,11 +22,11 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
 
 const Viewport = forwardRef(function Viewport(
-  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress }, ref) {
+  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open }, ref) {
   const canvasRef = useRef(null);
   const S = useRef(null);              // todo el estado imperativo de three.js
   const propsRef = useRef({});
-  propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress };
+  propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open };
 
   /* ---------- montaje: escena, luces, entorno, controles ---------- */
   useEffect(() => {
@@ -133,6 +133,11 @@ const Viewport = forwardRef(function Viewport(
       meshes: [], geo: null, grain: {}, mats: {},
       backMat: new THREE.MeshStandardMaterial({ color: 0xb9ae99, roughness: 0.9 }),
       metalMat: new THREE.MeshStandardMaterial({ color: 0x2b2b28, roughness: 0.36, metalness: 0.85 }),
+      chromeMat: new THREE.MeshStandardMaterial({ color: 0xd9d9d6, roughness: 0.22, metalness: 1 }),
+      /* zonas de toque de cada hueco: invisibles; la seleccionada, tintada */
+      pickMat: new THREE.MeshBasicMaterial({ color: 0x2e5e42, transparent: true, opacity: 0, depthWrite: false }),
+      selCellMat: new THREE.MeshBasicMaterial({ color: 0x3f8a5e, transparent: true, opacity: 0.2, depthWrite: false }),
+      extra: [], cells: {},
       cam: { theta: -0.52, phi: 1.32, r: 5.2, target: new THREE.Vector3(0, 1, 0),
              tTheta: -0.52, tPhi: 1.32, tR: 5.2, tTarget: new THREE.Vector3(0, 1, 0) },
       ray: new THREE.Raycaster(), ptr: new THREE.Vector2(),
@@ -238,6 +243,7 @@ const Viewport = forwardRef(function Viewport(
       const { onSelect } = propsRef.current;
       if (u && u.grp === "balda") onSelect({ k: "shelf", col: u.col, shelf: u.shelf });
       else if (u && u.grp === "divisor") onSelect({ k: "div", div: u.div });
+      else if (u && u.col != null && u.cell != null) onSelect({ k: "cell", col: u.col, cell: u.cell });
       else onSelect(null);
     };
 
@@ -303,7 +309,7 @@ const Viewport = forwardRef(function Viewport(
           const d = (st.hitPt.y - st.drag.start.y) * 1000;
           const c = p.columns[st.drag.u.col];
           const others = c.shelves.filter((_, i) => i !== st.drag.u.shelf);
-          const fl = c.drawers * DRAWER_H + (c.drawers ? 40 : 0);
+          const fl = 0;
           // salto de 32 mm: el sistema 32 real de ebanistería
           const v = clamp(Math.round((st.drag.base + d) / 32) * 32, fl + 140, Hi - 140);
           if (others.every((o) => Math.abs(o - v) >= 140)) {
@@ -438,6 +444,8 @@ const Viewport = forwardRef(function Viewport(
     /* cada pieza tiene ahora su propia geometría a tamaño real: se libera */
     st.meshes.forEach((m) => { st.root.remove(m); m.geometry.dispose(); });
     st.meshes = [];
+    st.extra.forEach((o) => st.root.remove(o));
+    st.extra = [];
     const geo = build(p);
     st.geo = geo;
 
@@ -477,13 +485,47 @@ const Viewport = forwardRef(function Viewport(
       return st.mats[ck];
     };
 
+    const t = p.thickness;
+    const openNow = !!open && !exploded;
+    const pull = openNow ? (p.depth - 60) * 0.6 : 0;          // cajones sacados
+    const handle = (x, horizontal) => {
+      const len = horizontal ? Math.min(x.L * 0.42, 180) : Math.min(x.Wd * 0.25, 220);
+      const hnd = new THREE.Mesh(horizontal
+        ? new THREE.BoxGeometry(len / 1000, 0.009, 0.022)
+        : new THREE.BoxGeometry(0.009, len / 1000, 0.022), st.metalMat);
+      hnd.castShadow = true;
+      hnd.userData = x;                   // tocar el tirador selecciona su hueco
+      st.meshes.push(hnd);
+      return { hnd, len };
+    };
+    const rail = (part) => {
+      const [px, py, pz] = part.pos;
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0125, 0.0125, part.L / 1000, 24), st.chromeMat);
+      bar.rotation.z = Math.PI / 2;
+      bar.position.set(px / 1000, py / 1000, pz / 1000);
+      bar.castShadow = true;
+      bar.userData = part;
+      st.root.add(bar); st.meshes.push(bar);
+      [-1, 1].forEach((sg) => {        // soportes atornillados al costado
+        const fl = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.006, 24), st.chromeMat);
+        fl.rotation.z = Math.PI / 2;
+        fl.position.set((px + sg * (part.L / 2 + 2)) / 1000, py / 1000, pz / 1000);
+        fl.userData = part;
+        st.root.add(fl); st.meshes.push(fl);
+      });
+    };
+
     geo.parts.forEach((part) => {
       if (part.hide || !part.pos) return;
+      if (part.grp === "barra") { rail(part); return; }
       const isBack = part.grp === "trasera";
       const isSel = selection && (
         (selection.k === "shelf" && part.grp === "balda" &&
          part.col === selection.col && part.shelf === selection.shelf) ||
-        (selection.k === "div" && part.grp === "divisor" && part.div === selection.div));
+        (selection.k === "div" && part.grp === "divisor" && part.div === selection.div) ||
+        /* hueco elegido: se resalta su frente (la puerta o los cajones) */
+        (selection.k === "cell" && part.grp === "frente" && part.col === selection.col &&
+         (part.cells ? selection.cell >= part.cells[0] && selection.cell <= part.cells[1] : part.cell === selection.cell)));
       const g = panelGeometry(part.size, part.id, !isBack && p.material === "abedul");
       const m = new THREE.Mesh(g, isBack ? st.backMat : [faceMat(isSel), edgeMat(isSel)]);
       let [px, py, pz] = part.pos;
@@ -492,13 +534,61 @@ const Viewport = forwardRef(function Viewport(
         if (isBack) pz -= 230;
         if (part.grp === "balda") pz += 90;
       }
-      m.position.set(px / 1000, py / 1000, pz / 1000);
+      if (part.drawer) pz += pull;
       m.castShadow = true;
       m.receiveShadow = true;
       m.userData = part;
-      st.root.add(m);
       st.meshes.push(m);
+      if (part.grp === "frente" && part.hinge) {
+        /* puerta: gira sobre el canto de las bisagras, por detrás de la hoja */
+        const side = part.hinge === "L" ? -1 : 1;
+        const pivot = new THREE.Group();
+        pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz - t / 2) / 1000);
+        pivot.rotation.y = openNow ? side * 1.9 : 0;
+        m.position.set((-side * part.L / 2) / 1000, 0, t / 2000);
+        pivot.add(m);
+        const { hnd, len } = handle(part, false);
+        const bottom = part.pos[1] - part.Wd / 2, top = part.pos[1] + part.Wd / 2;
+        const yh = clamp(1000, bottom + len / 2 + 60, top - len / 2 - 60);
+        hnd.position.set((-side * (part.L - 40)) / 1000, (yh - py) / 1000, (t + 11) / 1000);
+        pivot.add(hnd);
+        st.root.add(pivot);
+        st.extra.push(pivot);
+        return;
+      }
+      m.position.set(px / 1000, py / 1000, pz / 1000);
+      st.root.add(m);
+      if (part.grp === "frente") {
+        /* cajón: tirador horizontal centrado cerca del canto superior */
+        const { hnd } = handle(part, true);
+        hnd.position.set(px / 1000, (py + part.Wd / 2 - Math.min(45, part.Wd / 3)) / 1000, (pz + t / 2 + 11) / 1000);
+        st.root.add(hnd);
+      }
     });
+
+    /* zonas de toque: una por hueco, justo detrás del plano frontal */
+    st.cells = {};
+    {
+      let xx = geo.x0;
+      p.columns.forEach((c, i) => {
+        const bnd = [0, ...c.shelves, geo.Hi], last = c.shelves.length;
+        for (let j = 0; j <= last; j++) {
+          const lo = bnd[j] + (j > 0 ? t / 2 : 0), hi = bnd[j + 1] - (j < last ? t / 2 : 0);
+          const info = { grp: "hueco", col: i, cell: j,
+            pos: [xx + c.width / 2, geo.y0 + (lo + hi) / 2, p.depth / 2 - 8], size: [c.width - 2, hi - lo - 2, 4] };
+          st.cells[`${i}_${j}`] = info;
+          const sel = !!selection && selection.k === "cell" && selection.col === i && selection.cell === j;
+          const pk = new THREE.Mesh(new THREE.BoxGeometry(info.size[0] / 1000, info.size[1] / 1000, 0.004),
+                                    sel ? st.selCellMat : st.pickMat);
+          pk.position.set(info.pos[0] / 1000, info.pos[1] / 1000, (info.pos[2] + (sel && openNow ? 0 : 0)) / 1000);
+          pk.visible = sel;                 // invisible, pero recibe el toque
+          pk.userData = info;
+          st.root.add(pk);
+          st.meshes.push(pk);
+        }
+        xx += c.width + t;
+      });
+    }
 
     if (p.base === "patas") {
       const r = 0.017, h = p.baseHeight / 1000;
@@ -514,33 +604,11 @@ const Viewport = forwardRef(function Viewport(
       });
     }
 
-    geo.parts.filter((x) => x.grp === "frente" && x.pos).forEach((x) => {
-      const z = x.pos[2] + (exploded ? 260 : 0);
-      let hnd;
-      if (x.hinge) {
-        /* puerta: tirador vertical en el lado de apertura, a una altura alcanzable */
-        const len = Math.min(x.Wd * 0.25, 220);
-        hnd = new THREE.Mesh(new THREE.BoxGeometry(0.009, len / 1000, 0.022), st.metalMat);
-        const side = x.hinge === "L" ? 1 : -1;
-        const bottom = x.pos[1] - x.Wd / 2, top = x.pos[1] + x.Wd / 2;
-        const yh = clamp(1000, bottom + len / 2 + 60, top - len / 2 - 60);
-        hnd.position.set((x.pos[0] + side * (x.L / 2 - 40)) / 1000, yh / 1000, (z + p.thickness / 2 + 11) / 1000);
-      } else {
-        /* cajón: tirador horizontal centrado cerca del canto superior */
-        hnd = new THREE.Mesh(new THREE.BoxGeometry(Math.min(x.L * 0.42, 180) / 1000, 0.009, 0.022), st.metalMat);
-        hnd.position.set(x.pos[0] / 1000, (x.pos[1] + x.Wd / 2 - 45) / 1000, (z + p.thickness / 2 + 11) / 1000);
-      }
-      hnd.castShadow = true;
-      hnd.userData = { grp: "tirador" };
-      st.root.add(hnd);
-      st.meshes.push(hnd);
-    });
-
     st.root.position.y = p.base === "flotante" ? 0.42 : 0;
     st.fig.position.set((p.width / 2 + 560) / 1000, 0, p.depth / 2000);
     st.fig.visible = !!showScale && !st.photoOn;
     st.ptSceneDirty = true;   // el trazador reconstruye su escena si cambia el mueble
-  }, [params, selection, exploded, showScale]);
+  }, [params, selection, exploded, showScale, open]);
 
   /* ---------- modo foto: trazado de rutas ----------
      La librería se carga solo al activarlo: no pesa en la carga inicial y no
@@ -596,6 +664,7 @@ const Viewport = forwardRef(function Viewport(
   }, [photo]);
 
   useImperativeHandle(ref, () => ({
+    cellPart: (col, j) => S.current?.cells?.[`${col}_${j}`] || null,
     frame(preset, instant) {
       const st = S.current;
       if (!st) return;

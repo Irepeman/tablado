@@ -5,6 +5,7 @@
 import { writeFileSync } from "node:fs";
 import {
   DEFAULT, normalize, build, validate, SHEET, DRAWER_H, MATKEYS, BASES, deepCopy,
+  CELL_TYPES, drawersIn, cellClear, PRESETS, PRESET_KEYS, setRow, setCell, addRail,
 } from "../lib/model.js";
 import { cutlist, nest, quote } from "../lib/pricing.js";
 import { parseIntent } from "../lib/intent.js";
@@ -29,6 +30,7 @@ function randomDesign() {
       width: 100 + rnd() * 900,
       shelves: Array.from({ length: Math.floor(rnd() * 6) }, () => rnd() * 2400),
       drawers: Math.floor(rnd() * 5), door: rnd() < 0.35,
+      ...(rnd() < 0.5 ? { cells: Array.from({ length: 1 + Math.floor(rnd() * 7) }, () => pick(CELL_TYPES)) } : {}),
     })),
   };
 }
@@ -49,12 +51,18 @@ function invariants(p, tag) {
   check(Math.abs(sum - p.width) <= 1, "anchos de columna", `${tag}: suman ${Math.round(sum)} y el ancho es ${p.width}`);
   p.columns.forEach((c, i) => {
     check(c.width >= 150, "anchos de columna", `${tag}: columna ${i + 1} mide ${c.width} mm`);
-    check(c.drawers * DRAWER_H <= Hi + 0.5, "cajones que no caben",
-      `${tag}: ${c.drawers} cajones (${c.drawers * DRAWER_H} mm) en un hueco de ${Hi} mm`);
-    const floor = c.drawers * DRAWER_H + (c.drawers ? 40 : 0);
+    check(Array.isArray(c.cells) && c.cells.length === c.shelves.length + 1, "huecos",
+      `${tag}: columna ${i + 1} con ${c.shelves.length} baldas y ${c.cells && c.cells.length} huecos`);
+    (c.cells || []).forEach((x, j) => {
+      const nd = drawersIn(x), h = cellClear(p, c, j);
+      if (nd) check(h >= nd * 110 - 0.5, "cajones que no caben", `${tag}: ${nd} cajones en un hueco de ${Math.round(h)} mm`);
+      if (x.startsWith("rail")) check(h >= 599, "barra sin sitio", `${tag}: barra en un hueco de ${Math.round(h)} mm`);
+    });
+    check(c.drawers === (c.cells || []).reduce((a, x) => a + drawersIn(x), 0), "huecos",
+      `${tag}: columna ${i + 1} dice ${c.drawers} cajones y sus huecos no`);
     c.shelves.forEach((s, j) => {
-      check(s >= floor + 119 && s <= Hi - 119, "baldas fuera de sitio",
-        `${tag}: balda a ${s} mm en col ${i + 1} (zona válida ${floor + 120}–${Hi - 120}, ${c.drawers} cajones)`);
+      check(s >= 119 && s <= Hi - 119, "baldas fuera de sitio",
+        `${tag}: balda a ${s} mm en col ${i + 1} (zona válida 120–${Hi - 120})`);
       if (j) check(s - c.shelves[j - 1] >= 139, "baldas fuera de sitio", `${tag}: dos baldas a ${c.shelves[j - 1]} y ${s} mm`);
     });
   });
@@ -73,7 +81,7 @@ function invariants(p, tag) {
   for (let i = 0; i < bx.length; i++) for (let j = i + 1; j < bx.length; j++) {
     if (overlap(bx[i], bx[j])) check(false, "piezas que se solapan", `${tag}: ${bx[i].grp} (${bx[i].id}) × ${bx[j].grp} (${bx[j].id})`);
   }
-  for (const x of geo.parts) {
+  for (const x of geo.parts.filter((v) => !v.hw)) {
     const L = Math.max(x.L, x.Wd), Wd = Math.min(x.L, x.Wd);
     check(L <= SHEET.L - 2 * SHEET.margin && Wd <= SHEET.W - 2 * SHEET.margin, "piezas que no caben en el tablero",
       `${tag}: ${x.label} ${Math.round(x.L)}×${Math.round(x.Wd)}`);
@@ -125,6 +133,29 @@ const edge = {
   "8 columnas estrechas": { width: 1400, columns: Array.from({ length: 8 }, () => ({ width: 100, shelves: [300], drawers: 1, door: false })) },
 };
 for (const [name, d] of Object.entries(edge)) invariants(normalize(d), `límite: ${name}`);
+for (const k of PRESET_KEYS) for (const mat of MATKEYS) invariants(PRESETS[k](normalize({ material: mat })), `tipo ${k} en ${mat}`);
+{
+  const arm = PRESETS.armario(normalize({}));
+  check(arm.depth >= 580 && arm.columns.some((c) => c.cells.some((x) => x.startsWith("rail"))), "tipos de mueble", "el armario no tiene barra o le falta fondo");
+  const g = build(arm);
+  const doors = g.parts.filter((x) => x.id.startsWith("puerta"));
+  check(doors.every((d) => d.Wd > 1200 || d.cell > 0), "tipos de mueble", "el armario tiene puertas partidas en huecos pequeños");
+  const shallow = normalize({ ...arm, depth: 350 });
+  check(validate(shallow, build(shallow)).some((v) => v.fix === "hangDepth"), "tipos de mueble", "no avisa de que falta fondo para colgar");
+  for (const [w, type] of [["bottom", "drawer2"], ["top", "door"], ["middle", "rail"], [1, "drawer3"]]) {
+    const q = normalize(setRow(normalize(DEFAULT()), w, type));
+    invariants(q, `fila ${w} → ${type}`);
+  }
+  const tall = normalize({ columns: [{ width: 800, shelves: [], cells: ["open"] }] });
+  setCell(tall, tall.columns[0], 0, "drawer2");
+  const t2 = normalize(tall);
+  check(t2.columns[0].shelves.length === 1 && t2.columns[0].cells[0] === "drawer2", "huecos",
+    "dos cajones en un hueco de 1,8 m deberían ir abajo con una balda encima");
+  invariants(t2, "cajones en hueco alto");
+  const r = normalize(DEFAULT());
+  addRail(r, r.columns[0]);
+  invariants(normalize({ ...r, depth: 600 }), "barra en una estantería");
+}
 
 /* ---------- 2. El chat: frases reales y su resultado esperado ---------- */
 const base = () => normalize(DEFAULT());
@@ -169,7 +200,7 @@ const T = [
   ["mueble para la tele", null, (a) => a.height === 560],
   ["que no se vea lo de dentro", null, (a) => a.columns.every((c) => c.door)],
   ["dos cajones y puerta en la tercera", null, (a) => a.columns[2].drawers === 2 && a.columns[2].door && !a.columns[0].door],
-  ["4 cajones", (b) => { b.height = 700; }, (a) => a.columns[0].drawers * DRAWER_H <= a.height - a.baseHeight - 2 * a.thickness],
+  ["4 cajones", (b) => { b.height = 700; }, (a) => a.columns[0].drawers >= 1],
   ["hola", null, (a, b, r) => r === null || !!r.ask],
   ["¿cuánto cuesta?", null, (a, b, r) => !!(r && r.ask)],
   ["quiero una estantería", null, (a, b, r) => r === null || !!r.ask || JSON.stringify(a) === JSON.stringify(b)],

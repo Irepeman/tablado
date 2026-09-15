@@ -147,7 +147,7 @@ const even = (c, floor) => {
 };
 conv(["quiero cajones", "en todos los cuadros"], ({ a }) => allCols(a, (c) => c.drawers === 2));
 conv(["quiero cajones"], ({ a, r }) => col(a, 0).drawers === 2 && /columna 1/.test(r.changes.join(" ")) && r.suggest?.length === 2);
-conv(["quiero cajones"], ({ a }) => even(col(a, 0), 2 * 190 + 40) && col(a, 0).shelves.length === 3);
+conv(["quiero cajones"], ({ a }) => col(a, 0).cells[0] === "drawer2" && col(a, 0).shelves.join() === col(a, 1).shelves.join());
 conv(["quiero cajones", "mejor a la derecha"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0);
 conv(["pon puertas en la primera", "también en la tercera"], ({ a }) => col(a, 0).door && col(a, 2).door && !col(a, 1).door);
 conv(["una balda más en la segunda", "y en la cuarta"], ({ a }) => col(a, 1).shelves.length === 4 && col(a, 3).shelves.length === 4 && col(a, 0).shelves.length === 3);

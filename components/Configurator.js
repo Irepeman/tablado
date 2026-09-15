@@ -17,8 +17,8 @@ import Viewport from "./Viewport";
 import Chat from "./Chat";
 import SpecRail from "./SpecRail";
 import {
-  DEFAULT, DRAWER_H, normalize, build, validate,
-  maxSpan, deepCopy, clamp,
+  DEFAULT, normalize, build, validate,
+  maxSpan, deepCopy, clamp, setCell, setRow, isRail, drawersIn, cellClear, PRESETS, MIN_FRONT,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
@@ -75,6 +75,8 @@ export default function Configurator() {
   const [tab, setTab] = useState("spec");
   const [photo, setPhoto] = useState(false);
   const [photoSamples, setPhotoSamples] = useState(0);
+  const [openView, setOpenView] = useState(false);
+  const [rowMode, setRowMode] = useState(false);
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -139,7 +141,7 @@ export default function Configurator() {
     let raf;
     const tick = () => {
       const geo = vp.current?.geo();
-      const part = geo?.parts.find((x) =>
+      const part = selection.k === "cell" ? vp.current?.cellPart(selection.col, selection.cell) : geo?.parts.find((x) =>
         selection.k === "shelf"
           ? x.grp === "balda" && x.col === selection.col && x.shelf === selection.shelf
           : x.grp === "divisor" && x.div === selection.div);
@@ -280,8 +282,7 @@ export default function Configurator() {
     const over = c.width > maxSpan(params.material, params.thickness);
     const set = (nv) => {
       const others = c.shelves.filter((_, i) => i !== selection.shelf);
-      const fl = c.drawers * DRAWER_H + (c.drawers ? 40 : 0);
-      const val = clamp(Math.round(nv / 32) * 32, fl + 140, Hi - 140);
+      const val = clamp(Math.round(nv / 32) * 32, 140, Hi - 140);
       if (!others.every((o) => Math.abs(o - val) >= 140)) return;
       onCommitEdit((() => { const n = deepCopy(params); n.columns[selection.col].shelves[selection.shelf] = val; return n; })());
     };
@@ -312,6 +313,50 @@ export default function Configurator() {
         </div>
       </>
     );
+  };
+
+  const CELL_OPTIONS = ["open", "door", "drawer", "drawer2", "drawer3", "rail", "rail+door"];
+  const cellBox = () => {
+    const c = params.columns[selection.col];
+    if (!c) return null;
+    const j = Math.min(selection.cell, c.cells.length - 1);
+    const h = cellClear(params, c, j);
+    const pick = (type) => {
+      const n = deepCopy(params);
+      if (rowMode) setRow(n, j, type);
+      else setCell(n, n.columns[selection.col], j, type, n.columns);
+      if (isRail(type) && n.depth < 500) n.depth = 580;        // para colgar hacen falta 500 mm
+      onCommitEdit(n);
+    };
+    return (
+      <>
+        <h4>{L.cellTitle(selection.col + 1, j + 1)}</h4>
+        <div className="cellgrid">
+          {CELL_OPTIONS.map((ty) => {
+            const nd = drawersIn(ty);
+            const off = (isRail(ty) && h < 600) || (nd && h < nd * MIN_FRONT);
+            return (
+              <button key={ty} className="mini" aria-pressed={c.cells[j] === ty} disabled={!!off}
+                      title={off && isRail(ty) ? L.cellTooShort : undefined} onClick={() => pick(ty)}>
+                {L.cellTypes[ty]}
+              </button>
+            );
+          })}
+        </div>
+        <button className="rowbtn" aria-pressed={rowMode} onClick={() => setRowMode((v) => !v)}>
+          {rowMode ? L.wholeRowOn : L.wholeRow}
+        </button>
+      </>
+    );
+  };
+
+  const applyPreset = (k) => {
+    history.current.push(deepCopy(params));
+    setParams(PRESETS[k](params));
+    setSelection(null);
+    convo.current = {};
+    flash(L.presetApplied(L.presets[k]));
+    setTimeout(() => vp.current?.frame("34"), 30);
   };
 
   const divBox = () => {
@@ -380,7 +425,7 @@ export default function Configurator() {
           <Viewport
             ref={vp} params={params} selection={selection}
             exploded={exploded} showScale={showScale}
-            photo={photo} onPhotoProgress={setPhotoSamples}
+            photo={photo} onPhotoProgress={setPhotoSamples} open={openView}
             onChange={onEdit} onCommit={(snap) => { history.current.push(snap); }}
             onSelect={setSelection}
           />
@@ -399,6 +444,8 @@ export default function Configurator() {
               )}
             </div>
             <div className="vp-tr">
+              <button className="glass pill-btn" aria-pressed={openView} title={L.openTitle}
+                      onClick={() => setOpenView((v) => !v)}>{L.open}</button>
               <button className="glass iconbtn" title={L.viewFront} aria-label={L.viewFront} onClick={() => vp.current?.frame("front")}>▣</button>
               <button className="glass iconbtn" title={L.view34} aria-label={L.view34} onClick={() => vp.current?.frame("34")}>◱</button>
               <button className="glass iconbtn" title={L.viewTop} aria-label={L.viewTop} onClick={() => vp.current?.frame("top")}>⬒</button>
@@ -409,8 +456,8 @@ export default function Configurator() {
               </div>
             </div>
             {selection && selBox && (
-              <div className="glass selbox on" style={{ left: selBox.x, top: selBox.y }}>
-                {selection.k === "shelf" ? shelfBox() : divBox()}
+              <div className={"glass selbox on" + (selection.k === "cell" ? " wide" : "")} style={{ left: selBox.x, top: selBox.y }}>
+                {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox() : divBox()}
               </div>
             )}
           </div>
@@ -422,7 +469,7 @@ export default function Configurator() {
             onEdit={onEdit} onCommitEdit={onCommitEdit}
             onPushHistory={(snap) => { history.current.push(snap); }}
             onOrder={(q, rows, nested) => setModal({ q, rows, nested })}
-            onCsv={downloadCsv}
+            onCsv={downloadCsv} onPreset={applyPreset}
             onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); vp.current?.frame("34"); }}
           />
         </div>
