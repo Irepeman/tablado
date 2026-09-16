@@ -61,9 +61,19 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
 
   /* medidas: la que diga el mensaje, o una estimación por la forma */
   const aspect = quad ? quadAspect(quad) : 1;
-  const hintW = useMemo(() => {
-    const two = String(hint).replace(/,/g, ".").match(/(\d+(?:\.\d+)?)\s*(?:x|×|por)\s*(\d+(?:\.\d+)?)/);
-    return two ? [lenOf(two[1]), lenOf(two[2])] : [lenOf(hint), null];
+  /* medidas escritas junto a la foto: «1,80 x 2», «2 m de alto», «ancho 150 cm», «fondo 60» */
+  const hintDims = useMemo(() => {
+    const t = String(hint).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/,/g, ".");
+    const out = {};
+    const two = t.match(/(\d+(?:\.\d+)?\s*(?:mm|cm|m)?)\s*(?:x|×|por)\s*(\d+(?:\.\d+)?\s*(?:mm|cm|m)?)/);
+    if (two) { out.width = lenOf(two[1]); out.height = lenOf(two[2]); }
+    const NUM = "(\\d+(?:\\.\\d+)?\\s*(?:mm|cm|m)?)";
+    for (const [k, words] of [["width", "anch\\w*|wide|width"], ["height", "alt\\w*|high|tall|height"], ["depth", "fond\\w*|profund\\w*|deep|depth"]]) {
+      const m = t.match(new RegExp(NUM + "\\s*(?:de\\s+)?(?:" + words + ")")) || t.match(new RegExp("(?:" + words + ")\\s*(?:de\\s+)?" + NUM));
+      if (m) out[k] = lenOf(m[1]);
+    }
+    if (!out.width && !out.height && !two) { const v = lenOf(t); if (v) out.width = v; }
+    return out;
   }, [hint]);
   /* detección: solo al mover una esquina */
   const det = useMemo(() => {
@@ -72,9 +82,23 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
   }, [img, quad]);
   /* si se ve el costado, la cara de delante es más estrecha que lo marcado */
   const frontW = det ? Math.max(0.3, det.span[1] - det.span[0]) : 1;
-  const width = touched.width ? lenOf(dims.width) : hintW[0] || (aspect / frontW > 1.15 ? 1200 : 1800);
-  const height = touched.height ? lenOf(dims.height) : hintW[1] || clamp(Math.round((width * aspect) / frontW / 10) * 10, 400, 2600);
-  const depth = touched.depth ? lenOf(dims.depth) : null;
+  const a = aspect / frontW;                                   // alto / ancho de la cara de delante
+  const r10 = (v) => Math.round(v / 10) * 10;
+  /* sin medidas escritas, se parte del alto típico: 2 m un armario o una estantería,
+     90 cm una cómoda (solo cajones), 80 cm un mueble bajo y 50 cm uno de TV */
+  const guess = (() => {
+    const onlyDrawers = det && det.cols.every((c) => c.cells.every((x) => x.kind === "front")) && det.cols.some((c) => c.cells.length >= 3);
+    let h = a >= 0.75 ? 2000 : a >= 0.38 ? 800 : 500;
+    if (onlyDrawers && a >= 0.6 && a < 1.4) h = 900;
+    let w = r10(h / a);
+    if (w > 3200) { w = 3200; h = r10(w * a); }
+    if (w < 400) { w = 400; h = r10(w * a); }
+    return { width: w, height: clamp(h, 400, 2600) };
+  })();
+  const width = touched.width ? lenOf(dims.width) : hintDims.width || (hintDims.height ? r10(hintDims.height / a) : guess.width);
+  const height = touched.height ? lenOf(dims.height)
+    : hintDims.height || (touched.width || hintDims.width ? clamp(r10(width * a), 400, 2600) : guess.height);
+  const depth = touched.depth ? lenOf(dims.depth) : hintDims.depth || null;
 
   const result = useMemo(() => {
     if (!det || !width || !height) return null;
@@ -176,6 +200,7 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
                   </select>
                 </label>
               </div>
+              {!touched.width && !touched.height && !hintDims.width && !hintDims.height && <p className="photo-est">{L.photoEstimate}</p>}
               <p className="catalog-note">{L.photoTip}</p>
               <div className="photo-actions">
                 <button className="ghost" onClick={onCancel}>{L.cancel}</button>

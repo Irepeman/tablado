@@ -11,7 +11,7 @@ let seed = 77;
 const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
 
 /* layout: columnas con ancho relativo y huecos de abajo arriba [tipo, alto relativo] */
-function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [190, 150, 105], base = 0.04, side = 0 } = {}) {
+function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [190, 150, 105], base = 0.04, side = 0, cornice = 0, sideTone = 0.78 } = {}) {
   const data = new Uint8ClampedArray(W * H * 4);
   const set = (x, y, c) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
@@ -31,11 +31,16 @@ function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [1
   const carBot = by1 - bh * base;
   rect(bx0, by0, bx1, carBot, wood, 5);                      // carcasa
   if (side) {                                                 // costado visible, a la derecha
-    rect(bx1, by0, bx1 + side, by1, wood.map((v) => v * 0.78), 5);
+    rect(bx1, by0, bx1 + side, by1, wood.map((v) => v * sideTone), 5);
+  }
+  if (cornice) {                                              // cornisa: moldura algo más oscura con su sombra
+    rect(bx0 - 6, by0, bx1 + 6 + side, by0 + cornice, wood.map((v) => v * 0.9), 5);
+    rect(bx0 - 6, by0 + cornice - 3, bx1 + 6 + side, by0 + cornice, wood.map((v) => v * 0.4), 2);
+    for (let k = 1; k < 3; k++) rect(bx0 - 6, by0 + (cornice * k) / 3, bx1 + 6 + side, by0 + (cornice * k) / 3 + 1.5, wood.map((v) => v * 0.55), 2);
   }
   if (base) rect(bx0 + t * 2, carBot, bx1 - t * 2, by1, wood.map((v) => v * 0.8), 4);   // zócalo
   const dark = (x0, y0, x1, y1) => rect(x0, y0, x1, y1, wood.map((v) => v * 0.35), 3);
-  const innerTop = by0 + t, innerBot = carBot - t;
+  const innerTop = by0 + t + cornice, innerBot = carBot - t;
   let x = bx0 + t;
   const total = layout.reduce((a, c) => a + c.w, 0);
   layout.forEach((col, ci) => {
@@ -125,6 +130,19 @@ check("armario visto de lado", side, { width: 1200, height: 2400 },
   const det = detectStructure(rectify(side, side.quad, 480));
   if (!(det.span[1] < 0.9 && det.span[1] > 0.75)) fails.push(`armario visto de lado: el costado no se separa (span ${det.span.map((v) => v.toFixed(2))})`);
 }
+/* armario clásico: cornisa, costado de madera a la vista, 3 puertas y 2 filas de 3 cajones */
+const classic = draw(Array.from({ length: 3 }, () => ({ w: 1, cells: [R(0.13), R(0.13), D(0.74)] })),
+  { box: [200, 90, 700, 1030], side: 70, cornice: 40, wood: [120, 80, 50] });
+classic.quad = [[200, 90], [770, 90], [770, 1030], [200, 1030]];
+check("armario clásico con cornisa y costado", classic, { width: 1500, height: 2000 },
+      { columns: 3, open: 0, drawers: 6, doors: (g) => g.doors >= 3 });
+/* lo mismo, más difícil: costado casi del mismo tono, cornisa con molduras y foto en perspectiva */
+const classic2 = draw(Array.from({ length: 3 }, () => ({ w: 1, cells: [R(0.13), R(0.13), D(0.74)] })),
+  { W: 1000, box: [220, 90, 720, 1030], side: 90, cornice: 55, wood: [128, 86, 52], sideTone: 0.92 });
+classic2.quad = [[220, 90], [810, 90], [810, 1030], [220, 1030]];
+const classic2w = warp(classic2, [[30, 60], [1000, 0], [1000, 1100], [0, 1040]]);
+check("armario clásico en perspectiva", classic2w, { width: 1500, height: 2000 },
+      { columns: 3, open: 0, drawers: 6, doors: (g) => g.doors >= 3 });
 const mixed = [{ w: 1, cells: [D(), O(), O()] }, { w: 1.4, cells: [R(0.5), R(0.5), O(2), O(1)] }, { w: 1, cells: [D(), O(), O()] }];
 check("librería mixta", draw(mixed, { box: [110, 80, 790, 1020] }), { width: 2000, height: 2000 },
       { columns: 3, drawers: 2, doors: 2, open: (g) => g.open >= 5 });
