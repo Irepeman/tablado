@@ -11,7 +11,7 @@
    ============================================================ */
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import { MATERIALS, DRAWER_H, build, clamp, deepCopy, legCount } from "@/lib/model";
+import { MATERIALS, build, clamp, deepCopy, legCount } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -131,7 +131,6 @@ const Viewport = forwardRef(function Viewport(
       ptSceneDirty: true, ptCamDirty: false, lastCam: new THREE.Matrix4(), lastReport: 0,
       box: new THREE.BoxGeometry(1, 1, 1),
       meshes: [], geo: null, grain: {}, mats: {},
-      backMat: new THREE.MeshStandardMaterial({ color: 0xb9ae99, roughness: 0.9 }),
       metalMat: new THREE.MeshStandardMaterial({ color: 0x2b2b28, roughness: 0.36, metalness: 0.85 }),
       chromeMat: new THREE.MeshStandardMaterial({ color: 0xd9d9d6, roughness: 0.22, metalness: 1 }),
       /* zonas de toque de cada hueco: invisibles; la seleccionada, tintada */
@@ -143,7 +142,9 @@ const Viewport = forwardRef(function Viewport(
       ray: new THREE.Raycaster(), ptr: new THREE.Vector2(),
       dragPlane: new THREE.Plane(), hitPt: new THREE.Vector3(),
       drag: null, mode: null, last: { x: 0, y: 0 }, moved: 0,
-      pointers: new Map(), pinchDist: 0, pinchMid: { x: 0, y: 0 },
+      pointers: new Map(), pinchDist: 0, pinchMid: { x: 0, y: 0 }, pinchAng: 0,
+      spin: null, vel: { t: 0, p: 0 }, lastMoveT: 0,     // inercia al soltar un giro
+      wheel: { t: 0, pad: false }, gesture: null,        // trackpad: dos dedos y pellizco
       raf: 0, alive: true,
     };
     S.current = st;
@@ -183,6 +184,11 @@ const Viewport = forwardRef(function Viewport(
     };
     const stepCam = () => {
       const c = st.cam;
+      if (st.spin) {
+        c.tTheta += st.spin.t; c.tPhi += st.spin.p;
+        st.spin.t *= 0.94; st.spin.p *= 0.86;
+        if (Math.abs(st.spin.t) < 2e-4 && Math.abs(st.spin.p) < 2e-4) st.spin = null;
+      }
       c.tPhi = clamp(c.tPhi, 0.22, 1.6);
       c.tR = clamp(c.tR, R_MIN, R_MAX);
       const dT = c.tTheta - c.theta, dP = c.tPhi - c.phi, dR = c.tR - c.r;
@@ -204,11 +210,22 @@ const Viewport = forwardRef(function Viewport(
       st.ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
       return r;
     };
+    /* Antes se cogía cualquier balda o divisor que cruzara el rayo, aunque
+       estuviera escondido detrás de una puerta o un cajón: al tocar el frente
+       se arrastraba la pieza de detrás. Ahora manda la superficie más cercana.
+       Las zonas de hueco son planos invisibles justo detrás del frente: una
+       balda o un divisor solo gana si está pegado a ese plano (su canto o los
+       primeros centímetros), y si no se toca el hueco. */
     const pickAt = (e) => {
       setPtr(e);
       st.ray.setFromCamera(st.ptr, camera);
       const hits = st.ray.intersectObjects(st.meshes, false);
-      return hits.find((h) => h.object.userData && h.object.userData.drag) || hits[0] || null;
+      if (!hits.length) return null;
+      const first = hits[0];
+      const solid = hits.find((h) => h.object.userData?.grp !== "hueco");
+      if (solid && solid.object.userData.drag && solid.distance - first.distance < 0.07) return solid;
+      if (first.object.userData?.grp === "hueco") return first;
+      return solid || first;
     };
     /* el punto del mundo bajo el cursor: la pieza si la hay, si no un
        plano encarado a la cámara que pasa por el objetivo */
@@ -248,6 +265,8 @@ const Viewport = forwardRef(function Viewport(
     };
 
     const onDown = (e) => {
+      st.spin = null;
+      st.vel = { t: 0, p: 0 };
       canvas.setPointerCapture(e.pointerId);
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (st.pointers.size === 2) {
@@ -255,6 +274,7 @@ const Viewport = forwardRef(function Viewport(
         const [a, b] = [...st.pointers.values()];
         st.pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
         st.pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        st.pinchAng = Math.atan2(b.y - a.y, b.x - a.x);
         return;
       }
       if (st.pointers.size > 2) return;
@@ -287,11 +307,17 @@ const Viewport = forwardRef(function Viewport(
         const [a, b] = [...st.pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const ang = Math.atan2(b.y - a.y, b.x - a.x);
         if (st.pinchDist > 0) {
           st.cam.tR = clamp(st.cam.tR * (st.pinchDist / d), R_MIN, R_MAX);
           panBy(mid.x - st.pinchMid.x, mid.y - st.pinchMid.y);
+          /* girar los dos dedos en el sentido del reloj gira el mueble como arrastrar a la derecha */
+          let da = ang - st.pinchAng;
+          if (da > Math.PI) da -= 2 * Math.PI;
+          if (da < -Math.PI) da += 2 * Math.PI;
+          st.cam.tTheta -= da * 1.2;
         }
-        st.pinchDist = d; st.pinchMid = mid;
+        st.pinchDist = d; st.pinchMid = mid; st.pinchAng = ang;
         return;
       }
 
@@ -332,6 +358,10 @@ const Viewport = forwardRef(function Viewport(
       if (st.mode === "orbit") {
         st.cam.tTheta -= dx * 0.0068;
         st.cam.tPhi -= dy * 0.0062;
+        const now = performance.now(), dt = clamp(now - st.lastMoveT, 4, 60);
+        st.vel.t = st.vel.t * 0.5 + (-dx * 0.0068 / dt) * 0.5;
+        st.vel.p = st.vel.p * 0.5 + (-dy * 0.0062 / dt) * 0.5;
+        st.lastMoveT = now;
         st.last = { x: e.clientX, y: e.clientY };
       }
     };
@@ -344,6 +374,9 @@ const Viewport = forwardRef(function Viewport(
       } else if (st.mode === "orbit" && st.moved < 5 && e.type === "pointerup") {
         const hit = pickAt(e);
         selectFrom(hit ? hit.object.userData : null);
+      } else if (st.mode === "orbit" && st.pointers.size === 0 && performance.now() - st.lastMoveT < 70) {
+        /* soltar a medio giro: sigue girando y frena (velocidad por fotograma a 60 fps) */
+        st.spin = { t: clamp(st.vel.t * 16, -0.09, 0.09), p: clamp(st.vel.p * 16, -0.05, 0.05) };
       }
       if (st.pointers.size === 0) st.mode = null;
       else if (st.pointers.size === 1) {
@@ -353,15 +386,52 @@ const Viewport = forwardRef(function Viewport(
       }
     };
 
+    /* Rueda del ratón: zoom. Trackpad: deslizar con dos dedos gira el mueble
+       (a los lados gira, arriba y abajo inclina) y la inercia de macOS lo deja
+       girando; pellizcar hace zoom (en Chrome y Firefox llega como rueda con
+       ctrlKey; en Safari, como gesturechange, más abajo).
+       Para distinguir ratón y trackpad: el trackpad manda deltas finos y
+       seguidos (wheelDeltaY = −3·deltaY en Chrome y Safari) o desplazamiento
+       lateral; una ráfaga conserva su clasificación hasta 250 ms sin eventos. */
+    const looksLikePad = (e) => {
+      if (e.deltaMode !== 0) return false;
+      if (Math.abs(e.deltaX) > 0.5) return true;
+      if (typeof e.wheelDeltaY === "number" && e.wheelDeltaY !== 0) return Math.abs(e.wheelDeltaY + 3 * e.deltaY) < 2;
+      return Math.abs(e.deltaY) < 40 && !Number.isInteger(e.deltaY * 4);
+    };
     const onWheel = (e) => {
       e.preventDefault();
-      let d = e.deltaY;
-      if (e.deltaMode === 1) d *= 16;
-      else if (e.deltaMode === 2) d *= 100;
-      d = clamp(d, -140, 140);
-      // la pinza del trackpad llega como wheel con ctrlKey y deltas pequeños
-      zoomAt(e, Math.exp(d * (e.ctrlKey ? 0.0115 : 0.0021)));
+      st.spin = null;
+      let dx = e.deltaX, dy = e.deltaY;
+      if (e.deltaMode === 1) { dx *= 16; dy *= 16; } else if (e.deltaMode === 2) { dx *= 100; dy *= 100; }
+      if (e.ctrlKey) {
+        if (!st.gesture) zoomAt(e, Math.exp(clamp(dy, -140, 140) * 0.0115));
+        return;
+      }
+      const now = performance.now();
+      if (now - st.wheel.t > 250) st.wheel.pad = looksLikePad(e);
+      st.wheel.t = now;
+      if (st.wheel.pad) {
+        /* con el desplazamiento natural de macOS, deltaX va al revés que los dedos:
+           así el mueble sigue a los dedos, igual que al arrastrar */
+        st.cam.tTheta += clamp(dx, -120, 120) * 0.0052;
+        st.cam.tPhi += clamp(dy, -120, 120) * 0.0042;
+      } else {
+        zoomAt(e, Math.exp(clamp(dy || dx, -140, 140) * 0.0021));
+      }
     };
+    /* Safari en Mac: pellizco y giro de dos dedos en el trackpad.
+       scale y rotation son absolutos desde el inicio del gesto. Sin
+       preventDefault, Safari hace zoom a toda la página. */
+    const onGestureStart = (e) => { e.preventDefault(); st.spin = null; st.gesture = { scale: 1, rot: 0 }; };
+    const onGestureChange = (e) => {
+      e.preventDefault();
+      const g = st.gesture || { scale: 1, rot: 0 };
+      if (e.scale > 0) zoomAt(e, clamp(g.scale / e.scale, 0.8, 1.25));
+      st.cam.tTheta -= ((e.rotation - g.rot) * Math.PI / 180) * 1.2;
+      st.gesture = { scale: e.scale, rot: e.rotation };
+    };
+    const onGestureEnd = (e) => { e.preventDefault(); st.gesture = null; };
     const onDbl = (e) => {
       st.cam.tTarget.copy(pointUnder(e));
       clampTarget();
@@ -374,6 +444,9 @@ const Viewport = forwardRef(function Viewport(
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("gesturestart", onGestureStart);
+    canvas.addEventListener("gesturechange", onGestureChange);
+    canvas.addEventListener("gestureend", onGestureEnd);
     canvas.addEventListener("dblclick", onDbl);
     canvas.addEventListener("contextmenu", noMenu);
 
@@ -427,6 +500,9 @@ const Viewport = forwardRef(function Viewport(
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("gesturestart", onGestureStart);
+      canvas.removeEventListener("gesturechange", onGestureChange);
+      canvas.removeEventListener("gestureend", onGestureEnd);
       canvas.removeEventListener("dblclick", onDbl);
       canvas.removeEventListener("contextmenu", noMenu);
       st.pt?.dispose();
@@ -515,6 +591,17 @@ const Viewport = forwardRef(function Viewport(
       });
     };
 
+    /* trasera: tablero fino con el mismo acabado, mate y sin barniz */
+    const backMat = () => {
+      const ck = "back_" + p.material;
+      if (!st.mats[ck]) {
+        st.mats[ck] = wood
+          ? new THREE.MeshStandardMaterial({ map: woodSheet(p.material, R).map, color: 0xe9e2d6, roughness: 0.8, metalness: 0 })
+          : new THREE.MeshStandardMaterial({ color: M.hex, roughness: 0.62, metalness: 0 });
+      }
+      return st.mats[ck];
+    };
+
     geo.parts.forEach((part) => {
       if (part.hide || !part.pos) return;
       if (part.grp === "barra") { rail(part); return; }
@@ -527,7 +614,7 @@ const Viewport = forwardRef(function Viewport(
         (selection.k === "cell" && part.grp === "frente" && part.col === selection.col &&
          (part.cells ? selection.cell >= part.cells[0] && selection.cell <= part.cells[1] : part.cell === selection.cell)));
       const g = panelGeometry(part.size, part.id, !isBack && p.material === "abedul");
-      const m = new THREE.Mesh(g, isBack ? st.backMat : [faceMat(isSel), edgeMat(isSel)]);
+      const m = new THREE.Mesh(g, isBack ? backMat() : [faceMat(isSel), edgeMat(isSel)]);
       let [px, py, pz] = part.pos;
       if (exploded) {
         if (part.grp === "frente" || part.grp === "cajon") pz += 260;
@@ -544,7 +631,7 @@ const Viewport = forwardRef(function Viewport(
         const side = part.hinge === "L" ? -1 : 1;
         const pivot = new THREE.Group();
         pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz - t / 2) / 1000);
-        pivot.rotation.y = openNow ? side * 1.9 : 0;
+        pivot.rotation.y = openNow ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
         m.position.set((-side * part.L / 2) / 1000, 0, t / 2000);
         pivot.add(m);
         const { hnd, len } = handle(part, false);
@@ -672,11 +759,20 @@ const Viewport = forwardRef(function Viewport(
       const h = p.height / 1000, w = p.width / 1000;
       const lift = p.base === "flotante" ? 0.42 : 0;
       const c = st.cam;
+      const d = p.depth / 1000;
       c.tTarget.set(0, lift + h * 0.5, 0);
-      c.tR = Math.max(w, h) * 1.62 + 1.0;
-      if (preset === "front") { c.tTheta = 0; c.tPhi = Math.PI / 2; }
-      if (preset === "34") { c.tTheta = -0.52; c.tPhi = 1.32; }
-      if (preset === "top") { c.tTheta = -0.22; c.tPhi = 0.4; c.tR = Math.max(w, h) * 1.5 + 1.2; }
+      /* distancia para que quepa a lo ancho y a lo alto con el aspecto real del visor:
+         en un móvil vertical el ancho manda, y antes el mueble salía cortado */
+      const rect = canvasRef.current.getBoundingClientRect();
+      const aspect = clamp(rect.width / Math.max(1, rect.height), 0.35, 3);
+      const vf = (st.camera.fov * Math.PI) / 360, hf = Math.atan(Math.tan(vf) * aspect);
+      const fit = (ww, hh) => clamp(Math.max((hh / 2 + 0.1) / Math.tan(vf), (ww / 2 + 0.1) / Math.tan(hf)) * 1.12 + d / 2, R_MIN, R_MAX);
+      /* el ángulo más cercano al actual: tras varias vueltas, no desenrosca todas */
+      const near = (a) => a + 2 * Math.PI * Math.round((c.theta - a) / (2 * Math.PI));
+      if (preset === "front") { c.tTheta = near(0); c.tPhi = Math.PI / 2; c.tR = fit(w, h); }
+      if (preset === "34") { c.tTheta = near(-0.52); c.tPhi = 1.32; c.tR = fit(w * 0.87 + d * 0.5, h + d * 0.25); }
+      if (preset === "top") { c.tTheta = near(-0.22); c.tPhi = 0.4; c.tR = fit(w, d + h * 0.4); }
+      st.spin = null;
       if (instant) {
         c.theta = c.tTheta; c.phi = c.tPhi; c.r = c.tR; c.target.copy(c.tTarget);
       }
@@ -690,6 +786,21 @@ const Viewport = forwardRef(function Viewport(
         .add(st.root.position).project(st.camera);
       const r = canvasRef.current.getBoundingClientRect();
       return { x: (v.x * 0.5 + 0.5) * r.width, y: (-v.y * 0.5 + 0.5) * r.height, w: r.width, h: r.height };
+    },
+    projectBox(part) {
+      const st = S.current;
+      if (!st || !part?.pos) return null;
+      const r = canvasRef.current.getBoundingClientRect();
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+        const v = new THREE.Vector3(
+          (part.pos[0] + sx * part.size[0] / 2) / 1000,
+          (part.pos[1] + sy * part.size[1] / 2) / 1000,
+          (part.pos[2] + sz * part.size[2] / 2) / 1000).add(st.root.position).project(st.camera);
+        const px = (v.x * 0.5 + 0.5) * r.width, py = (-v.y * 0.5 + 0.5) * r.height;
+        x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+      }
+      return { x0, y0, x1, y1, w: r.width, h: r.height };
     },
     geo() { return S.current?.geo; },
   }), []);

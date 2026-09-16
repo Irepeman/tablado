@@ -18,7 +18,7 @@ import Chat from "./Chat";
 import SpecRail from "./SpecRail";
 import {
   DEFAULT, normalize, build, validate,
-  maxSpan, deepCopy, clamp, setCell, setRow, isRail, drawersIn, cellClear, PRESETS, MIN_FRONT,
+  maxSpan, deepCopy, clamp, setCell, isRail, drawersIn, cellClear, cellBounds, cellAtHeight, PRESETS, MIN_FRONT,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
@@ -76,7 +76,6 @@ export default function Configurator() {
   const [photo, setPhoto] = useState(false);
   const [photoSamples, setPhotoSamples] = useState(0);
   const [openView, setOpenView] = useState(false);
-  const [rowMode, setRowMode] = useState(false);
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -86,6 +85,7 @@ export default function Configurator() {
   const copilot = useRef(null);
   const vp = useRef(null);
   const toastT = useRef(null);
+  const selRef = useRef(null);
   /* el chat aún no se ha tocado: al cambiar de idioma se traduce entero */
   const pristine = useRef(true);
   /* de qué se habló en el último cambio: «en todas» se refiere a eso */
@@ -134,6 +134,11 @@ export default function Configurator() {
   }, []);
 
   useEffect(() => { vp.current?.frame("34", true); }, []);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" && !/INPUT|TEXTAREA/.test(e.target.tagName)) setSelection(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /* panel flotante sobre la pieza seleccionada */
   useEffect(() => {
@@ -145,10 +150,23 @@ export default function Configurator() {
         selection.k === "shelf"
           ? x.grp === "balda" && x.col === selection.col && x.shelf === selection.shelf
           : x.grp === "divisor" && x.div === selection.div);
-      const pr = part && vp.current?.project(part);
-      const next = pr ? { x: clamp(pr.x + 16, 8, pr.w - 215), y: clamp(pr.y - 14, 8, pr.h - 150) } : null;
+      const r = part && vp.current?.projectBox(part);
+      let next = null;
+      if (r) {
+        const PW = selRef.current?.offsetWidth || 240, PH = selRef.current?.offsetHeight || 220, G = 14, M = 8;
+        if (window.innerWidth <= 900) next = { dock: true, x: 0, y: 0 };   // móvil: abajo, fuera del 3D
+        else {
+          let x = r.x1 + G, y;
+          if (x + PW > r.w - M) x = r.x0 - G - PW;                 // a la izquierda si no cabe a la derecha
+          if (x < M) {                                              // ni a un lado ni a otro: encima o debajo
+            x = clamp((r.x0 + r.x1) / 2 - PW / 2, M, r.w - PW - M);
+            y = r.y0 - G - PH >= M ? r.y0 - G - PH : clamp(r.y1 + G, M, r.h - PH - M);
+          } else y = clamp((r.y0 + r.y1) / 2 - PH / 2, M, r.h - PH - M);
+          next = { x, y };
+        }
+      }
       // solo si se mueve: antes re-renderizaba toda la app 60 veces por segundo
-      setSelBox((prev) => (prev && next && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5) ? prev : next);
+      setSelBox((prev) => (prev && next && !!prev.dock === !!next.dock && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5) ? prev : next);
       raf = requestAnimationFrame(tick);
     };
     tick();
@@ -323,10 +341,24 @@ export default function Configurator() {
     const h = cellClear(params, c, j);
     const pick = (type) => {
       const n = deepCopy(params);
-      if (rowMode) setRow(n, j, type);
-      else setCell(n, n.columns[selection.col], j, type, n.columns);
+      setCell(n, n.columns[selection.col], j, type, n.columns);
       if (isRail(type) && n.depth < 500) n.depth = 580;        // para colgar hacen falta 500 mm
       onCommitEdit(n);
+    };
+    const wholeRow = () => {
+      const n = deepCopy(params);
+      const b = cellBounds(params, c);
+      const mid = (b[j] + b[j + 1]) / 2, type = c.cells[j];
+      n.columns.forEach((cc, i) => {
+        if (i === selection.col) return;
+        const jj = cellAtHeight(n, cc, mid);
+        const hh = cellClear(n, cc, jj), nd = drawersIn(type);
+        if ((isRail(type) && hh < 600) || (nd && hh < nd * MIN_FRONT)) return;   // donde no cabe, se deja
+        setCell(n, cc, jj, type, n.columns);
+      });
+      if (isRail(type) && n.depth < 500) n.depth = 580;
+      onCommitEdit(n);
+      flash(L.rowDone);
     };
     return (
       <>
@@ -343,18 +375,20 @@ export default function Configurator() {
             );
           })}
         </div>
-        <button className="rowbtn" aria-pressed={rowMode} onClick={() => setRowMode((v) => !v)}>
-          {rowMode ? L.wholeRowOn : L.wholeRow}
-        </button>
+        {params.columns.length > 1 && <button className="rowbtn" onClick={wholeRow}>{L.wholeRow}</button>}
       </>
     );
   };
 
   const applyPreset = (k) => {
     history.current.push(deepCopy(params));
-    setParams(PRESETS[k](params));
+    const next = PRESETS[k](params);
+    setParams(next);
     setSelection(null);
     convo.current = {};
+    pristine.current = false;
+    const m = (v) => (v / 1000).toLocaleString(lang === "en" ? "en-GB" : "es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    say({ role: "ai", text: L.presetSaid(L.presets[k], m(next.width), m(next.height)) });
     flash(L.presetApplied(L.presets[k]));
     setTimeout(() => vp.current?.frame("34"), 30);
   };
@@ -456,7 +490,8 @@ export default function Configurator() {
               </div>
             </div>
             {selection && selBox && (
-              <div className={"glass selbox on" + (selection.k === "cell" ? " wide" : "")} style={{ left: selBox.x, top: selBox.y }}>
+              <div ref={selRef} className={"glass selbox on" + (selection.k === "cell" ? " wide" : "") + (selBox.dock ? " dock" : "")}
+                   style={selBox.dock ? undefined : { left: selBox.x, top: selBox.y }}>
                 {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox() : divBox()}
               </div>
             )}

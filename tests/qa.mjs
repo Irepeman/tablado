@@ -152,6 +152,12 @@ for (const k of PRESET_KEYS) for (const mat of MATKEYS) invariants(PRESETS[k](no
   check(t2.columns[0].shelves.length === 1 && t2.columns[0].cells[0] === "drawer2", "huecos",
     "dos cajones en un hueco de 1,8 m deberían ir abajo con una balda encima");
   invariants(t2, "cajones en hueco alto");
+  const ap = PRESETS.aparador(normalize({}));
+  const hinges = build(ap).parts.filter((x) => x.hinge && x.L < 600).map((x) => `${x.col}${x.hinge}`);
+  check(hinges.includes("0L") && hinges.includes("2R"), "tipos de mueble",
+    `las puertas del aparador no abren hacia fuera por los dos lados: ${hinges.join(" ")}`);
+  const zp = normalize({ ...DEFAULT(), base: "zocalo", baseHeight: 80 });
+  check(build(zp).parts.some((x) => x.id.startsWith("zoc_t")), "base", "el zócalo no tiene pieza trasera");
   const r = normalize(DEFAULT());
   addRail(r, r.columns[0]);
   invariants(normalize({ ...r, depth: 600 }), "barra en una estantería");
