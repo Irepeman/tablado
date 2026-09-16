@@ -18,6 +18,16 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
+
+/* Modo foto: se suman muchas imágenes del mismo encuadre. En cada una la cámara
+   se mueve una fracción de píxel (bordes limpios) y la luz principal se desplaza
+   por un disco (sombras suaves, como bajo una ventana grande). Funciona con la
+   misma tarjeta gráfica que el visor normal, también en Safari y en móviles:
+   el trazador de rutas que había antes salía negro en Macs con chip Apple. */
+const PHOTO_FRAMES = 96;
+const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+const QUAD_VS = "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }";
 
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
 
@@ -57,6 +67,7 @@ const Viewport = forwardRef(function Viewport(
     scene.environmentIntensity = 0.7;
 
     const key = new THREE.DirectionalLight(0xfff6e8, 1.25);
+    const keyBase = new THREE.Vector3(2.6, 4.2, 3.2);
     key.position.set(2.6, 4.2, 3.2);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -129,8 +140,7 @@ const Viewport = forwardRef(function Viewport(
 
     const st = {
       renderer, scene, camera, root, fig, floor, wall, shadowPlane,
-      pt: null, photoOn: false, photoEnv: null, rasterEnv: null,
-      ptSceneDirty: true, ptCamDirty: false, lastCam: new THREE.Matrix4(), lastReport: 0,
+      photoOn: false, ph: null, lastReport: 0,
       box: new THREE.BoxGeometry(1, 1, 1),
       meshes: [], geo: null, grain: {}, mats: {},
       metalMat: new THREE.MeshStandardMaterial({ color: 0x2b2b28, roughness: 0.36, metalness: 0.85 }),
@@ -156,6 +166,7 @@ const Viewport = forwardRef(function Viewport(
       raf: 0, alive: true,
     };
     S.current = st;
+    st.key = key; st.keyBase = keyBase; st.gtao = gtao; st.composer = composer;
     /* resaltado del hueco donde se va a soltar una pieza: fuera de st.meshes, no se toca */
     st.dropMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), st.dropOk);
     st.dropMesh.visible = false;
@@ -580,30 +591,53 @@ const Viewport = forwardRef(function Viewport(
         renderer.setSize(w, h, false);
         composer.setPixelRatio(pr);
         composer.setSize(w, h);
-        st.ptCamDirty = true;
+        if (st.ph) st.ph.resize = true;
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
       }
       stepCam();
-      if (st.photoOn && st.pt) {
-        /* Modo foto: cada fotograma suma una muestra. Si la cámara se mueve
-           se reinicia la acumulación y se ve el render normal hasta converger. */
-        camera.updateMatrixWorld();
-        if (st.ptSceneDirty) {
-          st.pt.setScene(scene, camera);
-          st.pt.updateEnvironment();
-          st.ptSceneDirty = false;
-          st.lastCam.copy(camera.matrixWorld);
-        } else if (st.ptCamDirty || !camera.matrixWorld.equals(st.lastCam)) {
-          st.pt.updateCamera();
-          st.lastCam.copy(camera.matrixWorld);
-          st.ptCamDirty = false;
+      if (st.photoOn && st.ph) {
+        const ph = st.ph, now = performance.now();
+        const bw = renderer.domElement.width, bh = renderer.domElement.height;
+        if (ph.resize || ph.accA.width !== bw || ph.accA.height !== bh) {
+          ph.accA.setSize(bw, bh); ph.accB.setSize(bw, bh);
+          ph.resize = false; ph.dirty = true;
         }
-        st.pt.renderSample();
-        const now = performance.now();
-        if (now - st.lastReport > 250) {
+        camera.updateMatrixWorld();
+        if (ph.dirty || !camera.matrixWorld.equals(ph.lastCam)) {
+          /* se ha movido algo: se empieza de nuevo cuando la cámara se quede quieta */
+          ph.lastCam.copy(camera.matrixWorld);
+          ph.n = 0; ph.still = now; ph.dirty = false;
+        }
+        if (ph.n === 0 && now - ph.still < 180) {
+          composer.render();
+        } else if (ph.n < PHOTO_FRAMES) {
+          const i = ph.n + 1;
+          camera.setViewOffset(bw, bh, halton(i, 2) - 0.5, halton(i, 3) - 0.5, bw, bh);
+          const ang = i * 2.39996, rad = Math.sqrt(i / PHOTO_FRAMES) * 0.5;   // espiral de Fibonacci
+          key.position.set(keyBase.x + Math.cos(ang) * rad, keyBase.y, keyBase.z + Math.sin(ang) * rad);
+          composer.renderToScreen = false;
+          composer.render();
+          composer.renderToScreen = true;
+          camera.clearViewOffset();
+          key.position.copy(keyBase);
+          ph.accMat.uniforms.tAcc.value = ph.accA.texture;
+          ph.accMat.uniforms.tNew.value = composer.readBuffer.texture;
+          ph.accMat.uniforms.w.value = 1 / i;
+          renderer.setRenderTarget(ph.accB);
+          ph.accQuad.render(renderer);
+          [ph.accA, ph.accB] = [ph.accB, ph.accA];
+          ph.n = i;
+          renderer.setRenderTarget(null);
+          ph.copyMat.uniforms.t.value = ph.accA.texture;
+          ph.copyQuad.render(renderer);
+        } else {
+          renderer.setRenderTarget(null);
+          ph.copyQuad.render(renderer);
+        }
+        if (now - st.lastReport > 150) {
           st.lastReport = now;
-          propsRef.current.onPhotoProgress?.(Math.floor(st.pt.samples));
+          propsRef.current.onPhotoProgress?.(ph.n / PHOTO_FRAMES);
         }
       } else {
         composer.render();
@@ -628,7 +662,7 @@ const Viewport = forwardRef(function Viewport(
       canvas.removeEventListener("gestureend", onGestureEnd);
       canvas.removeEventListener("dblclick", onDbl);
       canvas.removeEventListener("contextmenu", noMenu);
-      st.pt?.dispose();
+      if (st.ph) { st.ph.accA.dispose(); st.ph.accB.dispose(); st.ph.accQuad.dispose(); st.ph.copyQuad.dispose(); }
       composer.dispose();
       renderer.dispose();
     };
@@ -864,60 +898,52 @@ const Viewport = forwardRef(function Viewport(
     st.root.position.y = p.base === "flotante" ? 0.42 : 0;
     st.fig.position.set((p.width / 2 + 560) / 1000, 0, p.depth / 2000);
     st.fig.visible = !!showScale && !st.photoOn;
-    st.ptSceneDirty = true;   // el trazador reconstruye su escena si cambia el mueble
+    if (st.ph) st.ph.dirty = true;   // la foto vuelve a empezar si cambia el mueble
   }, [params, selection, exploded, showScale, open]);
 
-  /* ---------- modo foto: trazado de rutas ----------
-     La librería se carga solo al activarlo: no pesa en la carga inicial y no
-     se evalúa en el servidor. Solo admite entornos equirectangulares, así que
-     mientras dura se usa un degradado de estudio y luego se restaura el
-     nuestro. El plano de sombra (ShadowMaterial) no lo entiende: se oculta,
-     y el suelo real recibe las sombras trazadas. */
+  /* ---------- modo foto: acumulación ---------- */
   useEffect(() => {
     const st = S.current;
     if (!st) return;
-    let cancelled = false;
+    const { renderer, key } = st;
+    const setShadow = (size) => {
+      key.shadow.mapSize.set(size, size);
+      key.shadow.map?.dispose();
+      key.shadow.map = null;
+    };
     if (photo) {
-      (async () => {
-        if (!st.pt) {
-          const { WebGLPathTracer, GradientEquirectTexture } = await import("three-gpu-pathtracer");
-          if (cancelled) return;
-          const pt = new WebGLPathTracer(st.renderer);
-          pt.tiles.set(2, 2);
-          pt.bounces = 6;
-          pt.minSamples = 3;
-          pt.renderDelay = 80;
-          pt.fadeDuration = 400;
-          pt.filterGlossyFactor = 0.5;
-          pt.dynamicLowRes = true;
-          pt.lowResScale = 0.25;
-          pt.textureSize.set(2048, 2048);    // que la veta no se emborrone
-          const env = new GradientEquirectTexture();
-          env.topColor.set(0xfaf7f0);
-          env.bottomColor.set(0x6f6a60);
-          env.exponent = 2;
-          env.update();
-          st.pt = pt;
-          st.photoEnv = env;
-        }
-        if (cancelled) return;
-        st.rasterEnv = st.scene.environment;
-        st.scene.environment = st.photoEnv;
-        st.scene.environmentIntensity = 1.0;
-        st.shadowPlane.visible = false;
-        st.fig.visible = false;
-        st.ptSceneDirty = true;
-        st.photoOn = true;
-      })();
+      if (!st.ph) {
+        const bw = renderer.domElement.width, bh = renderer.domElement.height;
+        const rt = () => new THREE.WebGLRenderTarget(bw, bh, { type: THREE.HalfFloatType, depthBuffer: false });
+        const accMat = new THREE.ShaderMaterial({
+          uniforms: { tAcc: { value: null }, tNew: { value: null }, w: { value: 1 } },
+          vertexShader: QUAD_VS,
+          fragmentShader: "uniform sampler2D tAcc; uniform sampler2D tNew; uniform float w; varying vec2 vUv;" +
+            "void main() { gl_FragColor = mix(texture2D(tAcc, vUv), texture2D(tNew, vUv), w); }",
+          depthTest: false, depthWrite: false,
+        });
+        const copyMat = new THREE.ShaderMaterial({
+          uniforms: { t: { value: null } },
+          vertexShader: QUAD_VS,
+          fragmentShader: "uniform sampler2D t; varying vec2 vUv; void main() { gl_FragColor = texture2D(t, vUv); }",
+          depthTest: false, depthWrite: false,
+        });
+        st.ph = { accA: rt(), accB: rt(), accMat, copyMat, accQuad: new FullScreenQuad(accMat), copyQuad: new FullScreenQuad(copyMat),
+                  lastCam: new THREE.Matrix4(), n: 0, still: 0, dirty: true, resize: false };
+      }
+      st.ph.dirty = true;
+      st.gtaoWas = st.gtao.enabled;
+      st.gtao.enabled = true;               // en la foto, siempre con oclusión ambiental
+      setShadow(4096);
+      st.fig.visible = false;
+      st.photoOn = true;
     } else if (st.photoOn) {
       st.photoOn = false;
-      st.scene.environment = st.rasterEnv;
-      st.scene.environmentIntensity = 0.7;
-      st.shadowPlane.visible = true;
+      st.gtao.enabled = st.gtaoWas;
+      setShadow(2048);
       st.fig.visible = !!propsRef.current.showScale;
       propsRef.current.onPhotoProgress?.(0);
     }
-    return () => { cancelled = true; };
   }, [photo]);
 
   useImperativeHandle(ref, () => ({
@@ -967,6 +993,14 @@ const Viewport = forwardRef(function Viewport(
       return tg ? { ...tg, ok } : null;
     },
     clearDrop() { S.current?.showDrop?.(null); },
+    /* la foto acumulada como PNG: se dibuja y se lee en la misma tarea */
+    snapshot(cb) {
+      const st = S.current;
+      if (!st?.ph) return cb(null);
+      st.renderer.setRenderTarget(null);
+      st.ph.copyQuad.render(st.renderer);
+      st.renderer.domElement.toBlob((blob) => cb(blob), "image/png");
+    },
     flash(target, item) {
       const st = S.current;
       if (!st?.showDrop) return;

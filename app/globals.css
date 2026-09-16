@@ -262,7 +262,11 @@ table.cut .r{text-align:right}
   .vp-bl{display:none}
 }
 /* el trazado de rutas es demasiado pesado para móviles */
-@media (max-width:900px),(pointer:coarse){.photo-btn{display:none}}
+/* modo foto: progreso y descarga */
+.photo-pill{gap:8px;font-size:11.5px}
+.photo-bar{display:inline-block;width:64px;height:4px;border-radius:2px;background:var(--line-2);overflow:hidden}
+.photo-bar i{display:block;height:100%;background:var(--pine);transition:width .15s linear}
+.photo-dl{padding:2px 9px;border-radius:var(--radius);background:var(--pine);color:var(--on-pine);font-size:11.5px;font-weight:600}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* selector de idioma */

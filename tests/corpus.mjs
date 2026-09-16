@@ -232,7 +232,15 @@ es("zapatero extraíble en todas", ({ a }) => all(a, (c) => c.cells.includes("tr
 es("blanca y con tiradores de latón", ({ a }) => a.material === "melamina_blanca" && a.handle === "bar_brass");
 es(["quiero cajones", "sin tiradores"], ({ a }) => col(a, 0).drawers === 2 && a.handle === "push");
 
+/* la conversación de la captura: tele, y la pregunta de si la aguanta */
+es("crea el mueble para una cama", honest(/mesita|cabecero/));
+es("cabecero con baldas", ({ a }) => a.height === 1000 && a.depth === 250 && a.columns.length === 3);
+es(["pues para una tele", "puede aguantar una tele?"], ({ r, a }) => !!r?.ask && /kg/.test(r.ask) && a.height === 560);
+es("¿soportaría una televisión grande?", ans(/kg/));
+
 /* =================== ENGLISH =================== */
+en("can it hold a TV on top?", ans(/kg/));
+en("a headboard with shelves", ({ a }) => a.height === 1000 && a.depth === 250);
 en("brass handles", ({ a }) => a.handle === "bar_brass");
 en("knobs please", ({ a }) => a.handle === "knob");
 en("handleless, push to open", ({ a }) => a.handle === "push");

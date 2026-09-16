@@ -481,7 +481,8 @@ export default function Configurator() {
         <div className="bar-right">
           <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>{L.scale}</button>
           <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>{L.exploded}</button>
-          <button className="tbtn photo-btn" aria-pressed={photo} onClick={() => setPhoto((v) => !v)}>{L.photo}</button>
+          <button className="tbtn photo-btn" aria-pressed={photo} title={L.photoTitle}
+                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); }}>{L.photo}</button>
           <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>{L.founder}</button>
           <button className="tbtn" onClick={undo}>{L.undo}</button>
         </div>
@@ -515,8 +516,20 @@ export default function Configurator() {
                 <b>{matName(params.material, lang)}</b> · {params.thickness} mm
               </div>
               {photo && (
-                <div className="glass pill mono">
-                  {photoSamples < 3 ? L.photoPreparing : L.photoSamples(photoSamples)}
+                <div className="glass pill photo-pill" role="status">
+                  {photoSamples < 1
+                    ? <><span className="photo-bar"><i style={{ width: `${Math.round(photoSamples * 100)}%` }} /></span>
+                        {photoSamples === 0 ? L.photoHold : L.photoWorking(Math.round(photoSamples * 100))}</>
+                    : <>{L.photoReady}
+                        <button className="photo-dl" onClick={() => vp.current?.snapshot((blob) => {
+                          if (!blob) return;
+                          const a = document.createElement("a");
+                          a.href = URL.createObjectURL(blob);
+                          a.download = `cutwise-${Math.round(params.width)}x${Math.round(params.height)}.png`;
+                          a.click();
+                          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+                          flash(L.photoSaved);
+                        })}>{L.photoDownload}</button></>}
                 </div>
               )}
             </div>
