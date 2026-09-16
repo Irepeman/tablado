@@ -384,3 +384,5 @@ table.cut .r{text-align:right}
 .photo-actions .cta{flex:2;margin:0}
 .photo-err{color:#b0412b}
 @media (max-width:900px){ .photo-body{grid-template-columns:1fr} .photo-modal{padding:16px} }
+.photo-svg .pside{fill:rgba(0,0,0,.28);stroke:none}
+.photo-sum small{display:block;margin-top:4px;font-weight:400;font-size:11.5px;color:var(--ink-2)}

@@ -11,7 +11,7 @@ let seed = 77;
 const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
 
 /* layout: columnas con ancho relativo y huecos de abajo arriba [tipo, alto relativo] */
-function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [190, 150, 105], base = 0.04 } = {}) {
+function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [190, 150, 105], base = 0.04, side = 0 } = {}) {
   const data = new Uint8ClampedArray(W * H * 4);
   const set = (x, y, c) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
@@ -30,6 +30,9 @@ function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [1
   const bw = bx1 - bx0, bh = by1 - by0, t = Math.max(3, bw * 0.012);
   const carBot = by1 - bh * base;
   rect(bx0, by0, bx1, carBot, wood, 5);                      // carcasa
+  if (side) {                                                 // costado visible, a la derecha
+    rect(bx1, by0, bx1 + side, by1, wood.map((v) => v * 0.78), 5);
+  }
   if (base) rect(bx0 + t * 2, carBot, bx1 - t * 2, by1, wood.map((v) => v * 0.8), 4);   // zócalo
   const dark = (x0, y0, x1, y1) => rect(x0, y0, x1, y1, wood.map((v) => v * 0.35), 3);
   const innerTop = by0 + t, innerBot = carBot - t;
@@ -112,6 +115,16 @@ const sb = draw(sideboard, { W: 1000, H: 700, box: [100, 200, 900, 560], base: 0
 check("aparador", sb, { width: 1800, height: 800 }, { columns: 3, doors: 2, drawers: 3, open: 0 });
 check("aparador en perspectiva", warp(sb, [[40, 30], [1000, 0], [1000, 700], [20, 650]]), { width: 1800, height: 800 },
       { columns: 3, doors: 2, drawers: 3 });
+/* armario de un módulo con dos puertas, fotografiado un poco de lado: se ve el costado */
+const side = draw([{ w: 1, cells: [D()] }, { w: 1, cells: [D()] }], { box: [250, 60, 650, 1040], side: 90 });
+side.quad = [[250, 60], [740, 60], [740, 1040], [250, 1040]];
+check("armario visto de lado", side, { width: 1200, height: 2400 },
+      { columns: 1, open: 0, doors: (g) => g.doors >= 1, rails: 1 });
+{
+  n++;
+  const det = detectStructure(rectify(side, side.quad, 480));
+  if (!(det.span[1] < 0.9 && det.span[1] > 0.75)) fails.push(`armario visto de lado: el costado no se separa (span ${det.span.map((v) => v.toFixed(2))})`);
+}
 const mixed = [{ w: 1, cells: [D(), O(), O()] }, { w: 1.4, cells: [R(0.5), R(0.5), O(2), O(1)] }, { w: 1, cells: [D(), O(), O()] }];
 check("librería mixta", draw(mixed, { box: [110, 80, 790, 1020] }), { width: 2000, height: 2000 },
       { columns: 3, drawers: 2, doors: 2, open: (g) => g.open >= 5 });

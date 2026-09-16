@@ -65,27 +65,33 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
     const two = String(hint).replace(/,/g, ".").match(/(\d+(?:\.\d+)?)\s*(?:x|×|por)\s*(\d+(?:\.\d+)?)/);
     return two ? [lenOf(two[1]), lenOf(two[2])] : [lenOf(hint), null];
   }, [hint]);
-  const width = touched.width ? lenOf(dims.width) : hintW[0] || (aspect > 1.15 ? 1200 : 1800);
-  const height = touched.height ? lenOf(dims.height) : hintW[1] || clamp(Math.round((width * aspect) / 10) * 10, 400, 2600);
+  /* detección: solo al mover una esquina */
+  const det = useMemo(() => {
+    if (!img || !quad) return null;
+    try { return detectStructure(rectify(img.data, quad, 480)); } catch { return null; }
+  }, [img, quad]);
+  /* si se ve el costado, la cara de delante es más estrecha que lo marcado */
+  const frontW = det ? Math.max(0.3, det.span[1] - det.span[0]) : 1;
+  const width = touched.width ? lenOf(dims.width) : hintW[0] || (aspect / frontW > 1.15 ? 1200 : 1800);
+  const height = touched.height ? lenOf(dims.height) : hintW[1] || clamp(Math.round((width * aspect) / frontW / 10) * 10, 400, 2600);
   const depth = touched.depth ? lenOf(dims.depth) : null;
 
-  /* detección: se recalcula al mover una esquina o cambiar una medida */
   const result = useMemo(() => {
-    if (!img || !quad || !width || !height) return null;
+    if (!det || !width || !height) return null;
     try {
-      const r = rectify(img.data, quad, 480);
-      const det = detectStructure(r);
       const params = toParams(det, { width, height, depth: depth || undefined, material: material || undefined });
       return { det, params, sum: summarize(params) };
     } catch {
       return null;
     }
-  }, [img, quad, width, height, depth, material]);
+  }, [det, width, height, depth, material]);
 
   /* líneas detectadas, llevadas de vuelta a la foto */
   const overlay = useMemo(() => {
     if (!result || !quad) return null;
-    const map = homography(quad);
+    const map0 = homography(quad);
+    const [s0, s1] = result.det.span;
+    const map = (u, v) => map0(s0 + u * (s1 - s0), v);          // columnas: dentro de la cara de delante
     const line = (u0, v0, u1, v1) => [map(u0, v0), map(u1, v1)];
     const lines = [], labels = [];
     result.det.cols.forEach((c, i) => {
@@ -95,7 +101,11 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
         labels.push({ p: map((c.x0 + c.x1) / 2, (cell.y0 + cell.y1) / 2), kind: cell.kind });
       });
     });
-    return { lines, labels };
+    /* el costado, marcado aparte */
+    const sides = [];
+    if (s0 > 0) sides.push([map0(0, 0), map0(s0, 0), map0(s0, 1), map0(0, 1)]);
+    if (s1 < 1) sides.push([map0(s1, 0), map0(1, 0), map0(1, 1), map0(s1, 1)]);
+    return { lines, labels, sides };
   }, [result, quad]);
 
   const toSvg = (e) => {
@@ -128,6 +138,9 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
                    onPointerMove={onMove} onPointerUp={() => { dragK.current = -1; }} onPointerCancel={() => { dragK.current = -1; }}>
                 <image href={img.url} x="0" y="0" width={img.w} height={img.h} />
                 <polygon points={quad.map((p) => p.join(",")).join(" ")} className="pq" />
+                {overlay?.sides.map((sd, i) => (
+                  <polygon key={"s" + i} points={sd.map((p) => p.join(",")).join(" ")} className="pside" />
+                ))}
                 {overlay?.lines.map((l, i) => (
                   <line key={i} x1={l.p[0][0]} y1={l.p[0][1]} x2={l.p[1][0]} y2={l.p[1][1]} className={"pl " + l.k} />
                 ))}
@@ -145,6 +158,7 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
             <div className="photo-side">
               <div className="photo-sum">
                 {s ? L.photoFound(s) : L.photoNothing}
+                {det && (det.span[0] > 0 || det.span[1] < 1) && <small>{L.photoSide}</small>}
               </div>
               <div className="photo-fields">
                 {[["width", L.width, width], ["height", L.heightL, height], ["depth", L.depth, depth ?? result?.params.depth]].map(([k, label, v]) => (
