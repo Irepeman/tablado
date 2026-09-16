@@ -5,7 +5,8 @@
 import { writeFileSync } from "node:fs";
 import {
   DEFAULT, normalize, build, validate, SHEET, DRAWER_H, MATKEYS, BASES, deepCopy,
-  CELL_TYPES, drawersIn, cellClear, PRESETS, PRESET_KEYS, setRow, setCell, addRail,
+  CELL_TYPES, drawersIn, drawerCount, hasBox, cellClear, PRESETS, PRESET_KEYS, setRow, setCell, addRail,
+  CATALOG, HANDLES, canPlace, applyItem, moveCell,
 } from "../lib/model.js";
 import { cutlist, nest, quote } from "../lib/pricing.js";
 import { parseIntent } from "../lib/intent.js";
@@ -25,7 +26,7 @@ function randomDesign() {
   const n = 1 + Math.floor(rnd() * 6);
   return {
     width: 600 + rnd() * 2600, height: 600 + rnd() * 2000, depth: 180 + rnd() * 420,
-    thickness: pick([16, 18, 22]), material: pick(MATKEYS), base: pick(BASES), back: rnd() < 0.7,
+    thickness: pick([16, 18, 22]), material: pick(MATKEYS), base: pick(BASES), back: rnd() < 0.7, handle: pick([...HANDLES, "raro"]),
     columns: Array.from({ length: n }, () => ({
       width: 100 + rnd() * 900,
       shelves: Array.from({ length: Math.floor(rnd() * 6) }, () => rnd() * 2400),
@@ -58,7 +59,10 @@ function invariants(p, tag) {
       if (nd) check(h >= nd * 110 - 0.5, "cajones que no caben", `${tag}: ${nd} cajones en un hueco de ${Math.round(h)} mm`);
       if (x.startsWith("rail")) check(h >= 599, "barra sin sitio", `${tag}: barra en un hueco de ${Math.round(h)} mm`);
     });
-    check(c.drawers === (c.cells || []).reduce((a, x) => a + drawersIn(x), 0), "huecos",
+    (c.cells || []).forEach((x, j) => {
+      if (hasBox(x)) check(cellClear(p, c, j) >= 149.5, "cajones que no caben", `${tag}: ${x} en un hueco de ${Math.round(cellClear(p, c, j))} mm`);
+    });
+    check(c.drawers === (c.cells || []).reduce((a, x) => a + drawerCount(x), 0), "huecos",
       `${tag}: columna ${i + 1} dice ${c.drawers} cajones y sus huecos no`);
     c.shelves.forEach((s, j) => {
       check(s >= 119 && s <= Hi - 119, "baldas fuera de sitio",
@@ -112,7 +116,9 @@ function invariants(p, tag) {
   check(q.margin > 0.4 && q.margin < 0.7, "presupuesto", `${tag}: margen ${(q.margin * 100).toFixed(1)} %`);
   const drawers = p.columns.reduce((a, c) => a + c.drawers, 0);
   check(q.hw.runners === drawers, "presupuesto", `${tag}: ${drawers} cajones pero ${q.hw.runners} pares de guías`);
-  const boxPieces = rows.filter((r) => /cajón/.test(r.label) && !/Frente/.test(r.label)).reduce((a, r) => a + r.qty, 0);
+  const boxPieces = geo.parts.filter((x) => x.grp === "cajon").reduce((a, x) => a + (x.qty || 1), 0);
+  const fronts = geo.parts.filter((x) => x.grp === "frente" && !x.nohandle).length;
+  check(q.hw.handles === fronts, "presupuesto", `${tag}: ${fronts} frentes pero ${q.hw.handles} tiradores`);
   check(boxPieces === drawers * 5, "despiece de cajones", `${tag}: ${drawers} cajones → ${boxPieces} piezas de caja (deben ser 5 por cajón)`);
   const doors = vis.filter((v) => v.id.startsWith("puerta"));
   const needHinges = doors.reduce((a, d) => a + (d.Wd <= 900 ? 2 : d.Wd <= 1600 ? 3 : d.Wd <= 2000 ? 4 : 5), 0);
@@ -152,6 +158,43 @@ for (const k of PRESET_KEYS) for (const mat of MATKEYS) invariants(PRESETS[k](no
   check(t2.columns[0].shelves.length === 1 && t2.columns[0].cells[0] === "drawer2", "huecos",
     "dos cajones en un hueco de 1,8 m deberían ir abajo con una balda encima");
   invariants(t2, "cajones en hueco alto");
+  const all = [...CATALOG.fronts, ...CATALOG.inside, ...CATALOG.handles];
+  let placed = 0, refused = 0;
+  for (const k of PRESET_KEYS) {
+    const base0 = PRESETS[k](normalize({ handle: "knob" }));
+    check(base0.handle === "knob", "catálogo", `el tipo ${k} pierde el tirador elegido`);
+    base0.columns.forEach((c, col) => c.cells.forEach((_, cell) => {
+      for (const item of all) {
+        const q = deepCopy(base0);
+        const ok = canPlace(q, item, col, cell).ok;
+        const r = applyItem(q, item, col, cell);
+        check(ok === r.ok, "catálogo", `${k}: canPlace y applyItem no coinciden con ${item}`);
+        if (!r.ok) { refused++; check(!!r.reason, "catálogo", `${k}: ${item} rechazado sin motivo`); continue; }
+        placed++;
+        const n = normalize(q);
+        invariants(n, `${k}: ${item} en columna ${col + 1}, hueco ${cell + 1}`);
+        if (item.startsWith("h:")) check(n.handle === item.slice(2), "catálogo", `${k}: el tirador ${item} no se aplica`);
+        else if (!["open", "shelf", "divider"].includes(item)) {
+          const got = n.columns[col].cells;
+          check(got.some((x) => x === item || x.includes(item.replace("tray", "drawer")) || (item === "rail" && x.startsWith("rail")) || (item === "door" && x.includes("door"))),
+                "catálogo", `${k}: ${item} en columna ${col + 1} no aparece (${got.join(",")})`);
+        }
+        /* y moverlo al primer hueco de otra columna */
+        const to = { col: (col + 1) % n.columns.length, cell: 0 };
+        const m = deepCopy(n);
+        if (moveCell(m, { col, cell: Math.min(cell, m.columns[col].cells.length - 1) }, to).ok) invariants(normalize(m), `${k}: mover ${item}`);
+      }
+    }));
+  }
+  check(placed > 300 && refused > 20, "catálogo", `colocadas ${placed}, rechazadas ${refused}`);
+  {
+    const d = normalize(DEFAULT());
+    check(!applyItem(d, "rail", 0, 0).ok, "catálogo", "una barra cabe en un hueco de 42 cm");
+    check(applyItem(d, "tray", 0, 0).ok && normalize(d).columns[0].cells[0] === "tray", "catálogo", "la bandeja no se coloca");
+    const lib = PRESETS.libreria(normalize({}));
+    applyItem(lib, "tray", 1, 0);
+    check(normalize(lib).columns[1].cells[0] === "door+drawer", "catálogo", "una bandeja detrás de una puerta debería ser cajón interior");
+  }
   const ap = PRESETS.aparador(normalize({}));
   const hinges = build(ap).parts.filter((x) => x.hinge && x.L < 600).map((x) => `${x.col}${x.hinge}`);
   check(hinges.includes("0L") && hinges.includes("2R"), "tipos de mueble",

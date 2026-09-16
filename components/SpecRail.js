@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
-  MATERIALS, MATKEYS, THICKNESSES, SHEET, MIN_FRONT, PRESET_KEYS,
+  MATERIALS, MATKEYS, THICKNESSES, SHEET, MIN_FRONT, PRESET_KEYS, HANDLES,
   maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build, isRail, cellClear,
 } from "@/lib/model";
 
@@ -177,6 +177,13 @@ export default function SpecRail({
             <label>{L.back}</label>
             <Seg value={p.back} options={[[true, L.withBack], [false, L.noBack]]}
                  onPick={(v) => edit((x) => { x.back = v === true || v === "true"; })} />
+          </div>
+          <div className="f">
+            <label htmlFor="handle-style">{L.handleL}</label>
+            <select id="handle-style" className="sel" value={p.handle || "bar"}
+                    onChange={(e) => edit((x) => { x.handle = e.target.value; })}>
+              {HANDLES.map((h) => <option key={h} value={h}>{L.items["h:" + h]}</option>)}
+            </select>
           </div>
         </section>
 

@@ -215,7 +215,31 @@ en("drawers in every compartment", everyCell(/^drawer/));
 en("a drawer in each cubby", ({ a }) => all(a, (c) => c.cells.every((x) => x === "drawer")));
 es(["quiero cajones", "en los cuadrados de abajo"], ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1));
 
+/* piezas: tiradores, cajón interior y bandeja extraíble */
+es("tiradores de latón", ({ a }) => a.handle === "bar_brass" && a.material === "roble");
+es("ponle pomos", ({ a }) => a.handle === "knob");
+es("sin tiradores", ({ a }) => a.handle === "push");
+es("con apertura push", ({ a }) => a.handle === "push");
+es("tiradores embutidos", ({ a }) => a.handle === "cup");
+es("uñeros", ({ a }) => a.handle === "cup");
+es("gola de aluminio", ({ a }) => a.handle === "profile");
+es("tiradores negros", ({ a }) => a.handle === "bar" && a.material === "roble", (p) => { p.handle = "knob"; });
+es("pomos negros", ({ a }) => a.handle === "knob" && a.material === "roble");
+es("cambia los tiradores", ans(/pomo/));
+es("un cajón interior en la segunda", ({ a }) => col(a, 1).cells.includes("door+drawer") && col(a, 0).drawers === 0);
+es("bandeja extraíble para zapatos", ({ a }) => col(a, 0).cells.includes("tray") && a.depth === 320);
+es("zapatero extraíble en todas", ({ a }) => all(a, (c) => c.cells.includes("tray")));
+es("blanca y con tiradores de latón", ({ a }) => a.material === "melamina_blanca" && a.handle === "bar_brass");
+es(["quiero cajones", "sin tiradores"], ({ a }) => col(a, 0).drawers === 2 && a.handle === "push");
+
 /* =================== ENGLISH =================== */
+en("brass handles", ({ a }) => a.handle === "bar_brass");
+en("knobs please", ({ a }) => a.handle === "knob");
+en("handleless, push to open", ({ a }) => a.handle === "push");
+en("recessed handles", ({ a }) => a.handle === "cup");
+en("an inner drawer in the second column", ({ a }) => col(a, 1).cells.includes("door+drawer"));
+en("a pull-out shoe rack", ({ a }) => col(a, 0).cells.includes("tray"));
+en("change the handles", ans(/knob/));
 en("drawers in the bottom row", ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1));
 en("doors on the top row", ({ a }) => all(a, (c) => lastCell(c) === "door" && c.cells[0] !== "door"));
 en("add a clothes rail", hasRail);

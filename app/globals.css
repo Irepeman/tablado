@@ -314,3 +314,43 @@ table.cut .r{text-align:right}
 .selbox.dock{position:fixed;left:8px;right:8px;bottom:8px;top:auto;width:auto;max-width:none;z-index:40;
   box-shadow:0 8px 30px rgba(0,0,0,.18)}
 .selbox.dock .cellgrid{grid-template-columns:repeat(4,minmax(0,1fr))}
+
+/* ---------- catálogo de piezas ---------- */
+.catalog{position:absolute;left:12px;top:96px;bottom:12px;width:246px;overflow:auto;padding:10px 10px 12px;z-index:5;
+  display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
+.catalog-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.catalog-head b{font-size:12px;font-weight:600;color:var(--ink)}
+.xbtn{width:26px;height:26px;border-radius:var(--radius);color:var(--ink-3);font-size:18px;line-height:1;background:transparent}
+.xbtn:hover{color:var(--ink);background:var(--field)}
+.catalog-group h5{margin:0 0 6px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.parts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.part{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 3px 5px;border:1px solid var(--line-2);
+  border-radius:var(--radius);background:var(--field);color:var(--ink-2);font-size:10.5px;line-height:1.15;text-align:center;
+  cursor:grab;touch-action:manipulation;user-select:none;-webkit-user-select:none;transition:border-color .12s,color .12s,background .12s}
+.part:hover{border-color:var(--pine);color:var(--ink)}
+.part:active{cursor:grabbing}
+.part[aria-pressed="true"]{border-color:var(--pine);background:var(--pine);color:var(--on-pine)}
+.part-icon{width:36px;height:30px}
+.picon .hd{stroke-width:2.6}
+.picon .thick{stroke-width:2.8}
+.picon .dash{stroke-dasharray:3 2}
+.picon .dot{fill:currentColor;stroke:none}
+.catalog-note{margin:2px 0 0;font-size:11px;color:var(--ink-3);line-height:1.35}
+.part-ghost{position:fixed;z-index:60;pointer-events:none;transform:translate(14px,14px);display:flex;align-items:center;gap:6px;
+  padding:5px 10px 5px 6px;border-radius:var(--radius);background:var(--paper);border:1.5px solid var(--line-2);
+  box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:12px;color:var(--ink)}
+.part-ghost.ok{border-color:var(--pine)}
+.part-ghost.bad{border-color:#c0412b;opacity:.85}
+.placing-bar{position:absolute;top:56px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;
+  padding:6px 6px 6px 12px;font-size:12.5px;color:var(--ink);z-index:6;white-space:nowrap}
+.placing-bar button{padding:4px 10px;border-radius:var(--radius);border:1px solid var(--line-2);background:var(--field);font-size:12px;color:var(--ink-2)}
+.sel{flex:1;min-width:0;padding:5px 8px;border:1px solid var(--line-2);border-radius:var(--radius);background:var(--field);
+  color:var(--ink);font:inherit;font-size:12px}
+@media (max-width:900px){
+  .catalog{position:fixed;left:8px;right:8px;top:auto;bottom:8px;width:auto;max-height:48vh;z-index:40;box-shadow:0 8px 30px rgba(0,0,0,.2)}
+  .parts{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .placing-bar{position:fixed;top:auto;bottom:12px;z-index:41}
+  .parts-btn{order:-1}
+}
+/* móvil: las medidas bajo la barra del visor, que ya no caben al lado */
+@media (max-width:900px){ .vp-tl{top:54px;max-width:calc(100% - 24px)} }

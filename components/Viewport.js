@@ -11,7 +11,7 @@
    ============================================================ */
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import { MATERIALS, build, clamp, deepCopy, legCount } from "@/lib/model";
+import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -22,11 +22,13 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
 
 const Viewport = forwardRef(function Viewport(
-  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open }, ref) {
+  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open,
+    placing, onPlace, canDropAt, onMoveCell }, ref) {
   const canvasRef = useRef(null);
   const S = useRef(null);              // todo el estado imperativo de three.js
   const propsRef = useRef({});
-  propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open };
+  propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open,
+    placing, onPlace, canDropAt, onMoveCell };
 
   /* ---------- montaje: escena, luces, entorno, controles ---------- */
   useEffect(() => {
@@ -133,6 +135,12 @@ const Viewport = forwardRef(function Viewport(
       meshes: [], geo: null, grain: {}, mats: {},
       metalMat: new THREE.MeshStandardMaterial({ color: 0x2b2b28, roughness: 0.36, metalness: 0.85 }),
       chromeMat: new THREE.MeshStandardMaterial({ color: 0xd9d9d6, roughness: 0.22, metalness: 1 }),
+      brassMat: new THREE.MeshStandardMaterial({ color: 0xc19a5b, roughness: 0.3, metalness: 1 }),
+      aluMat: new THREE.MeshStandardMaterial({ color: 0xbfc2c3, roughness: 0.38, metalness: 1 }),
+      recessMat: new THREE.MeshStandardMaterial({ color: 0x151513, roughness: 0.55, metalness: 0.4 }),
+      dropOk: new THREE.MeshBasicMaterial({ color: 0x3f8a5e, transparent: true, opacity: 0.38, depthWrite: false }),
+      dropBad: new THREE.MeshBasicMaterial({ color: 0xc0412b, transparent: true, opacity: 0.32, depthWrite: false }),
+      dropMesh: null, move: null,
       /* zonas de toque de cada hueco: invisibles; la seleccionada, tintada */
       pickMat: new THREE.MeshBasicMaterial({ color: 0x2e5e42, transparent: true, opacity: 0, depthWrite: false }),
       selCellMat: new THREE.MeshBasicMaterial({ color: 0x3f8a5e, transparent: true, opacity: 0.2, depthWrite: false }),
@@ -148,6 +156,11 @@ const Viewport = forwardRef(function Viewport(
       raf: 0, alive: true,
     };
     S.current = st;
+    /* resaltado del hueco donde se va a soltar una pieza: fuera de st.meshes, no se toca */
+    st.dropMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), st.dropOk);
+    st.dropMesh.visible = false;
+    st.dropMesh.renderOrder = 10;
+    root.add(st.dropMesh);
 
     /* ----- tema: el fondo del visor sigue al de la página ----- */
     const syncTheme = () => {
@@ -239,6 +252,60 @@ const Viewport = forwardRef(function Viewport(
       const out = new THREE.Vector3();
       return st.ray.ray.intersectPlane(pl, out) ? out : st.cam.tTarget.clone();
     };
+    /* Hueco bajo un punto de la pantalla: el plano del hueco si se toca, y si se
+       toca cualquier pieza (un frente, un costado), la columna y la altura del punto. */
+    const targetAt = (clientX, clientY) => {
+      const r = canvas.getBoundingClientRect();
+      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+      st.ptr.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+      st.ray.setFromCamera(st.ptr, camera);
+      const p = propsRef.current.params, geo = st.geo;
+      if (!geo) return null;
+      for (const h of st.ray.intersectObjects(st.meshes, false)) {
+        const u = h.object.userData;
+        if (!u) continue;
+        if (u.grp === "hueco") return { col: u.col, cell: u.cell };
+        const t = p.thickness;
+        const xm = h.point.x * 1000, ym = (h.point.y - st.root.position.y) * 1000 - geo.y0;
+        let xx = geo.x0;
+        for (let i = 0; i < p.columns.length; i++) {
+          const c = p.columns[i];
+          if (xm >= xx - t / 2 && xm <= xx + c.width + t / 2) {
+            if (ym < -t || ym > geo.Hi + t) return { col: i, cell: null };
+            return { col: i, cell: cellAtHeight(p, c, clamp(ym, 0, geo.Hi - 1)) };
+          }
+          xx += c.width + t;
+        }
+        return { col: null, cell: null };
+      }
+      return null;
+    };
+    /* pinta el resaltado: un hueco, una columna entera (divisor) o todo el frente (tiradores) */
+    const showDrop = (target, ok, item) => {
+      const p = propsRef.current.params, geo = st.geo, m = st.dropMesh;
+      if (!target || !geo) { m.visible = false; return; }
+      const t = p.thickness, z = (p.depth / 2 + t + 8) / 1000;
+      let box = null;
+      if (item && item.startsWith("h:")) {
+        box = [0, p.baseHeight + (p.height - p.baseHeight) / 2, p.width, p.height - p.baseHeight];
+      } else if (target.col != null && item === "divider") {
+        let xx = geo.x0;
+        for (let i = 0; i < target.col; i++) xx += p.columns[i].width + t;
+        const c = p.columns[target.col];
+        box = [xx + c.width / 2, geo.y0 + geo.Hi / 2, c.width, geo.Hi];
+      } else if (target.col != null && target.cell != null) {
+        const info = st.cells[`${target.col}_${target.cell}`];
+        if (info) box = [info.pos[0], info.pos[1], info.size[0], info.size[1]];
+      }
+      if (!box) { m.visible = false; return; }
+      m.material = ok ? st.dropOk : st.dropBad;
+      m.position.set(box[0] / 1000, box[1] / 1000, z);
+      m.scale.set(box[2] / 1000, box[3] / 1000, 0.004);
+      m.visible = true;
+    };
+    st.targetAt = targetAt;
+    st.showDrop = showDrop;
+
     const zoomAt = (e, factor) => {
       const p = pointUnder(e);
       const nr = clamp(st.cam.tR * factor, R_MIN, R_MAX);
@@ -282,6 +349,17 @@ const Viewport = forwardRef(function Viewport(
       st.moved = 0;
       if (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey) { st.mode = "pan"; return; }
       const hit = pickAt(e);
+      /* con un hueco elegido, arrastrar su frente, su barra o su tirador lo lleva a otro hueco */
+      const sel = propsRef.current.selection, hu = hit && hit.object.userData;
+      const own = sel && sel.k === "cell" && hu && hu.col === sel.col && e.button === 0 && !propsRef.current.placing &&
+        ["frente", "cajon", "barra", "hueco"].includes(hu.grp) &&
+        (hu.cells ? sel.cell >= hu.cells[0] && sel.cell <= hu.cells[1] : hu.cell === sel.cell) &&
+        (propsRef.current.params.columns[sel.col]?.cells[sel.cell] || "open") !== "open";
+      if (own) {
+        st.mode = "move";
+        st.move = { from: { col: sel.col, cell: sel.cell }, to: null };
+        return;
+      }
       if (hit && hit.object.userData.drag && e.button === 0) {
         const u = hit.object.userData;
         const p = propsRef.current.params;
@@ -300,7 +378,26 @@ const Viewport = forwardRef(function Viewport(
     };
 
     const onMove = (e) => {
+      /* colocando una pieza del catálogo: el hueco bajo el puntero se resalta */
+      if (!st.pointers.size && propsRef.current.placing) {
+        const tg = targetAt(e.clientX, e.clientY);
+        showDrop(tg, !!tg && !!propsRef.current.canDropAt?.(propsRef.current.placing, tg), propsRef.current.placing);
+        return;
+      }
       if (!st.pointers.has(e.pointerId)) return;
+      if (st.mode === "move" && st.move) {
+        st.moved += Math.abs(e.clientX - st.last.x) + Math.abs(e.clientY - st.last.y);
+        st.last = { x: e.clientX, y: e.clientY };
+        if (st.moved > 6) {
+          const tg = targetAt(e.clientX, e.clientY);
+          const src = propsRef.current.params.columns[st.move.from.col].cells[st.move.from.cell];
+          const same = tg && tg.col === st.move.from.col && tg.cell === st.move.from.cell;
+          st.move.to = tg && !same ? tg : null;
+          showDrop(tg, !!st.move.to && !!propsRef.current.canDropAt?.(src, tg), src);
+          canvas.style.cursor = "grabbing";
+        }
+        return;
+      }
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (st.mode === "pinch" && st.pointers.size >= 2) {
@@ -368,6 +465,26 @@ const Viewport = forwardRef(function Viewport(
 
     const onUp = (e) => {
       st.pointers.delete(e.pointerId);
+      if (st.mode === "move" && st.move) {
+        showDrop(null);
+        canvas.style.cursor = propsRef.current.placing ? "copy" : "";
+        if (st.moved > 6) {
+          if (st.move.to && e.type === "pointerup") propsRef.current.onMoveCell?.(st.move.from, st.move.to);
+        } else {
+          const hit = pickAt(e);
+          selectFrom(hit ? hit.object.userData : null);
+        }
+        st.move = null;
+        st.mode = null;
+        return;
+      }
+      if (st.mode === "orbit" && st.moved < 5 && e.type === "pointerup" && propsRef.current.placing) {
+        /* modo colocar: el toque pone la pieza en vez de elegir */
+        showDrop(null);
+        propsRef.current.onPlace?.(targetAt(e.clientX, e.clientY));
+        st.mode = null;
+        return;
+      }
       if (st.mode === "drag" && st.drag) {
         if (st.moved > 4) propsRef.current.onCommit(st.drag.snap);
         st.drag = null;
@@ -444,6 +561,8 @@ const Viewport = forwardRef(function Viewport(
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    const onLeave = () => { if (!st.pointers.size) showDrop(null); };
+    canvas.addEventListener("pointerleave", onLeave);
     canvas.addEventListener("gesturestart", onGestureStart);
     canvas.addEventListener("gesturechange", onGestureChange);
     canvas.addEventListener("gestureend", onGestureEnd);
@@ -500,6 +619,7 @@ const Viewport = forwardRef(function Viewport(
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("pointerleave", onLeave);
       canvas.removeEventListener("gesturestart", onGestureStart);
       canvas.removeEventListener("gesturechange", onGestureChange);
       canvas.removeEventListener("gestureend", onGestureEnd);
@@ -510,6 +630,13 @@ const Viewport = forwardRef(function Viewport(
       renderer.dispose();
     };
   }, []);
+
+  useEffect(() => {
+    const st = S.current;
+    if (!st || !canvasRef.current) return;
+    canvasRef.current.style.cursor = placing ? "copy" : "";
+    if (!placing) st.showDrop?.(null);
+  }, [placing]);
 
   /* ---------- reconstruir la malla cuando cambia el diseño ---------- */
   useEffect(() => {
@@ -564,15 +691,48 @@ const Viewport = forwardRef(function Viewport(
     const t = p.thickness;
     const openNow = !!open && !exploded;
     const pull = openNow ? (p.depth - 60) * 0.6 : 0;          // cajones sacados
-    const handle = (x, horizontal) => {
-      const len = horizontal ? Math.min(x.L * 0.42, 180) : Math.min(x.Wd * 0.25, 220);
-      const hnd = new THREE.Mesh(horizontal
-        ? new THREE.BoxGeometry(len / 1000, 0.009, 0.022)
-        : new THREE.BoxGeometry(0.009, len / 1000, 0.022), st.metalMat);
-      hnd.castShadow = true;
-      hnd.userData = x;                   // tocar el tirador selecciona su hueco
-      st.meshes.push(hnd);
-      return { hnd, len };
+    /* Tiradores con el estilo del mueble. El origen del grupo es el anclaje sobre
+       la cara del frente y la pieza sale hacia +z. Tocar un tirador elige su hueco. */
+    const style = p.handle || "bar";
+    const handle = (x, vertical) => {
+      if (style === "push" || x.nohandle) return null;
+      const g = new THREE.Group();
+      const put = (geom, mat, px, py, pz) => {
+        const m = new THREE.Mesh(geom, mat);
+        m.position.set(px, py, pz);
+        m.castShadow = true;
+        m.userData = x;
+        g.add(m);
+        st.meshes.push(m);
+      };
+      if (style === "bar" || style === "bar_brass") {
+        /* barra sobre dos patas, separada 30 mm del frente */
+        const mat = style === "bar" ? st.metalMat : st.brassMat;
+        const L = (vertical ? Math.min(x.Wd * 0.25, 220) : Math.min(x.L * 0.42, 180)) / 1000;
+        put(vertical ? new THREE.BoxGeometry(0.01, L, 0.01) : new THREE.BoxGeometry(L, 0.01, 0.01), mat, 0, 0, 0.03);
+        for (const sg of [-1, 1]) {
+          const o = sg * (L / 2 - 0.012);
+          put(new THREE.CylinderGeometry(0.0035, 0.0035, 0.028, 10).rotateX(Math.PI / 2), mat, vertical ? 0 : o, vertical ? o : 0, 0.014);
+        }
+        g.userData.len = L * 1000;
+      } else if (style === "knob") {
+        put(new THREE.CylinderGeometry(0.006, 0.008, 0.022, 20).rotateX(Math.PI / 2), st.metalMat, 0, 0, 0.011);
+        put(new THREE.SphereGeometry(0.015, 24, 16).scale(1, 1, 0.6), st.metalMat, 0, 0, 0.028);
+        g.userData.len = 30;
+      } else if (style === "cup") {
+        /* embutido: marco de aluminio enrasado y el hueco para los dedos */
+        const w = vertical ? 0.03 : 0.12, h = vertical ? 0.12 : 0.03;
+        put(new THREE.BoxGeometry(w, h, 0.003), st.aluMat, 0, 0, 0.0015);
+        put(new THREE.BoxGeometry(w - 0.01, h - 0.01, 0.002), st.recessMat, 0, 0, 0.0032);
+        g.userData.len = 120;
+      } else if (style === "profile") {
+        /* gola: perfil de aluminio a lo largo de todo el canto de apertura */
+        const len = (vertical ? x.Wd : x.L) / 1000;
+        put(vertical ? new THREE.BoxGeometry(0.018, len, 0.016) : new THREE.BoxGeometry(len, 0.018, 0.016), st.aluMat, 0, 0, 0.008);
+        g.userData.len = len * 1000;
+        g.userData.edge = true;
+      }
+      return g;
     };
     const rail = (part) => {
       const [px, py, pz] = part.pos;
@@ -634,11 +794,14 @@ const Viewport = forwardRef(function Viewport(
         pivot.rotation.y = openNow ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
         m.position.set((-side * part.L / 2) / 1000, 0, t / 2000);
         pivot.add(m);
-        const { hnd, len } = handle(part, false);
-        const bottom = part.pos[1] - part.Wd / 2, top = part.pos[1] + part.Wd / 2;
-        const yh = clamp(1000, bottom + len / 2 + 60, top - len / 2 - 60);
-        hnd.position.set((-side * (part.L - 40)) / 1000, (yh - py) / 1000, (t + 11) / 1000);
-        pivot.add(hnd);
+        const hnd = handle(part, true);
+        if (hnd) {
+          const len = hnd.userData.len;
+          const bottom = part.pos[1] - part.Wd / 2, top = part.pos[1] + part.Wd / 2;
+          const yh = hnd.userData.edge ? py : clamp(1000, bottom + len / 2 + 60, top - len / 2 - 60);
+          hnd.position.set((-side * (part.L - (hnd.userData.edge ? 9 : 40))) / 1000, (yh - py) / 1000, t / 1000);
+          pivot.add(hnd);
+        }
         st.root.add(pivot);
         st.extra.push(pivot);
         return;
@@ -646,10 +809,14 @@ const Viewport = forwardRef(function Viewport(
       m.position.set(px / 1000, py / 1000, pz / 1000);
       st.root.add(m);
       if (part.grp === "frente") {
-        /* cajón: tirador horizontal centrado cerca del canto superior */
-        const { hnd } = handle(part, true);
-        hnd.position.set(px / 1000, (py + part.Wd / 2 - Math.min(45, part.Wd / 3)) / 1000, (pz + t / 2 + 11) / 1000);
-        st.root.add(hnd);
+        /* cajón: tirador horizontal centrado cerca del canto superior; la gola, en el canto */
+        const hnd = handle(part, false);
+        if (hnd) {
+          const dy = hnd.userData.edge ? part.Wd / 2 - 9 : part.Wd / 2 - Math.min(45, part.Wd / 3);
+          hnd.position.set(px / 1000, (py + dy) / 1000, (pz + t / 2) / 1000);
+          st.root.add(hnd);
+          st.extra.push(hnd);
+        }
       }
     });
 
@@ -787,6 +954,16 @@ const Viewport = forwardRef(function Viewport(
       const r = canvasRef.current.getBoundingClientRect();
       return { x: (v.x * 0.5 + 0.5) * r.width, y: (-v.y * 0.5 + 0.5) * r.height, w: r.width, h: r.height };
     },
+    /* arrastrando una pieza del catálogo: resalta el hueco bajo el puntero */
+    dropAt(clientX, clientY, item) {
+      const st = S.current;
+      if (!st?.targetAt) return null;
+      const tg = st.targetAt(clientX, clientY);
+      const ok = !!tg && !!propsRef.current.canDropAt?.(item, tg);
+      st.showDrop(tg, ok, item);
+      return tg ? { ...tg, ok } : null;
+    },
+    clearDrop() { S.current?.showDrop?.(null); },
     projectBox(part) {
       const st = S.current;
       if (!st || !part?.pos) return null;

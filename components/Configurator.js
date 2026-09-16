@@ -16,9 +16,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Viewport from "./Viewport";
 import Chat from "./Chat";
 import SpecRail from "./SpecRail";
+import Catalog from "./Catalog";
 import {
   DEFAULT, normalize, build, validate,
-  maxSpan, deepCopy, clamp, setCell, isRail, drawersIn, cellClear, cellBounds, cellAtHeight, PRESETS, MIN_FRONT,
+  maxSpan, deepCopy, clamp, setCell, isRail, cellBounds, cellAtHeight, PRESETS,
+  canPlace, applyItem, moveCell,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
@@ -76,6 +78,8 @@ export default function Configurator() {
   const [photo, setPhoto] = useState(false);
   const [photoSamples, setPhotoSamples] = useState(0);
   const [openView, setOpenView] = useState(false);
+  const [showParts, setShowParts] = useState(false);
+  const [placing, setPlacing] = useState(null);      // pieza del catálogo esperando un toque en un hueco
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -86,6 +90,8 @@ export default function Configurator() {
   const vp = useRef(null);
   const toastT = useRef(null);
   const selRef = useRef(null);
+  const partsOpen = useRef(false);
+  partsOpen.current = showParts;
   /* el chat aún no se ha tocado: al cambiar de idioma se traduce entero */
   const pristine = useRef(true);
   /* de qué se habló en el último cambio: «en todas» se refiere a eso */
@@ -135,7 +141,9 @@ export default function Configurator() {
 
   useEffect(() => { vp.current?.frame("34", true); }, []);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape" && !/INPUT|TEXTAREA/.test(e.target.tagName)) setSelection(null); };
+    const onKey = (e) => {
+      if (e.key === "Escape" && !/INPUT|TEXTAREA/.test(e.target.tagName)) { setSelection(null); setPlacing(null); }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
@@ -156,10 +164,11 @@ export default function Configurator() {
         const PW = selRef.current?.offsetWidth || 240, PH = selRef.current?.offsetHeight || 220, G = 14, M = 8;
         if (window.innerWidth <= 900) next = { dock: true, x: 0, y: 0 };   // móvil: abajo, fuera del 3D
         else {
+          const ML = partsOpen.current ? 270 : M;                  // con el catálogo abierto, a su derecha
           let x = r.x1 + G, y;
           if (x + PW > r.w - M) x = r.x0 - G - PW;                 // a la izquierda si no cabe a la derecha
-          if (x < M) {                                              // ni a un lado ni a otro: encima o debajo
-            x = clamp((r.x0 + r.x1) / 2 - PW / 2, M, r.w - PW - M);
+          if (x < ML) {                                             // ni a un lado ni a otro: encima o debajo
+            x = clamp((r.x0 + r.x1) / 2 - PW / 2, ML, r.w - PW - M);
             y = r.y0 - G - PH >= M ? r.y0 - G - PH : clamp(r.y1 + G, M, r.h - PH - M);
           } else y = clamp((r.y0 + r.y1) / 2 - PH / 2, M, r.h - PH - M);
           next = { x, y };
@@ -333,16 +342,46 @@ export default function Configurator() {
     );
   };
 
-  const CELL_OPTIONS = ["open", "door", "drawer", "drawer2", "drawer3", "rail", "rail+door"];
+  /* ¿se puede soltar aquí? El visor pregunta mientras se arrastra */
+  const canDropAt = (item, tg) => {
+    if (!tg || !item) return false;
+    if (item.startsWith("h:")) return true;
+    if (tg.col == null || (tg.cell == null && item !== "divider")) return false;
+    return canPlace(params, item, tg.col, tg.cell).ok;
+  };
+  const why = (r) => (r.reason === "short" ? L.why.short(r.need) : L.why[r.reason] ?? L.why.nowhere);
+  const placeItem = (item, tg) => {
+    if (!tg || (!item.startsWith("h:") && tg.col == null)) { flash(L.why.nowhere); return false; }
+    const n = deepCopy(params);
+    const r = applyItem(n, item, tg.col ?? 0, tg.cell);
+    if (!r.ok) { flash(why(r)); return false; }
+    onCommitEdit(n);
+    flash(L.placed(L.items[item]) + (r.deeper ? ` · ${L.deeper}` : ""));
+    if (!item.startsWith("h:") && item !== "divider" && tg.cell != null) setSelection({ k: "cell", col: tg.col, cell: tg.cell });
+    else setSelection(null);
+    return true;
+  };
+  const onMoveCell = (from, to) => {
+    if (to.col == null || to.cell == null) { flash(L.why.nowhere); return; }
+    const n = deepCopy(params);
+    const r = moveCell(n, from, to);
+    if (!r.ok) { if (r.reason !== "same") flash(why(r)); return; }
+    onCommitEdit(n);
+    flash(L.moved + (r.deeper ? ` · ${L.deeper}` : ""));
+    setSelection({ k: "cell", col: to.col, cell: to.cell });
+  };
+
+  const CELL_OPTIONS = ["open", "door", "drawer", "drawer2", "drawer3", "door+drawer", "tray", "rail", "rail+door"];
   const cellBox = () => {
     const c = params.columns[selection.col];
     if (!c) return null;
     const j = Math.min(selection.cell, c.cells.length - 1);
-    const h = cellClear(params, c, j);
     const pick = (type) => {
       const n = deepCopy(params);
-      setCell(n, n.columns[selection.col], j, type, n.columns);
-      if (isRail(type) && n.depth < 500) n.depth = 580;        // para colgar hacen falta 500 mm
+      if (type === "rail+door") {
+        setCell(n, n.columns[selection.col], j, type, n.columns);
+        if (n.depth < 500) n.depth = 580;                       // para colgar hacen falta 500 mm
+      } else if (!applyItem(n, type, selection.col, j).ok) return;
       onCommitEdit(n);
     };
     const wholeRow = () => {
@@ -352,8 +391,7 @@ export default function Configurator() {
       n.columns.forEach((cc, i) => {
         if (i === selection.col) return;
         const jj = cellAtHeight(n, cc, mid);
-        const hh = cellClear(n, cc, jj), nd = drawersIn(type);
-        if ((isRail(type) && hh < 600) || (nd && hh < nd * MIN_FRONT)) return;   // donde no cabe, se deja
+        if (!canPlace(n, type, i, jj).ok) return;                // donde no cabe, se deja
         setCell(n, cc, jj, type, n.columns);
       });
       if (isRail(type) && n.depth < 500) n.depth = 580;
@@ -365,11 +403,10 @@ export default function Configurator() {
         <h4>{L.cellTitle(selection.col + 1, j + 1)}</h4>
         <div className="cellgrid">
           {CELL_OPTIONS.map((ty) => {
-            const nd = drawersIn(ty);
-            const off = (isRail(ty) && h < 600) || (nd && h < nd * MIN_FRONT);
+            const chk = canPlace(params, ty, selection.col, j);
             return (
-              <button key={ty} className="mini" aria-pressed={c.cells[j] === ty} disabled={!!off}
-                      title={off && isRail(ty) ? L.cellTooShort : undefined} onClick={() => pick(ty)}>
+              <button key={ty} className="mini" aria-pressed={c.cells[j] === ty} disabled={!chk.ok}
+                      title={chk.ok ? L.itemsHelp[ty] : why(chk)} onClick={() => pick(ty)}>
                 {L.cellTypes[ty]}
               </button>
             );
@@ -462,6 +499,8 @@ export default function Configurator() {
             photo={photo} onPhotoProgress={setPhotoSamples} open={openView}
             onChange={onEdit} onCommit={(snap) => { history.current.push(snap); }}
             onSelect={setSelection}
+            placing={placing} canDropAt={canDropAt} onMoveCell={onMoveCell}
+            onPlace={(tg) => { if (placing && placeItem(placing, tg)) setPlacing(null); }}
           />
           <div className="hud">
             <div className="vp-tl">
@@ -478,17 +517,34 @@ export default function Configurator() {
               )}
             </div>
             <div className="vp-tr">
+              <button className="glass pill-btn parts-btn" aria-pressed={showParts} title={L.piecesTitle}
+                      onClick={() => { setShowParts((v) => !v); setPlacing(null); }}>＋ {L.piecesBtn}</button>
               <button className="glass pill-btn" aria-pressed={openView} title={L.openTitle}
                       onClick={() => setOpenView((v) => !v)}>{L.open}</button>
               <button className="glass iconbtn" title={L.viewFront} aria-label={L.viewFront} onClick={() => vp.current?.frame("front")}>▣</button>
               <button className="glass iconbtn" title={L.view34} aria-label={L.view34} onClick={() => vp.current?.frame("34")}>◱</button>
               <button className="glass iconbtn" title={L.viewTop} aria-label={L.viewTop} onClick={() => vp.current?.frame("top")}>⬒</button>
             </div>
-            <div className="vp-bl">
-              <div className="glass hint">
-                <b>{L.hintBold}</b>{L.hintRest}
+            {!showParts && (
+              <div className="vp-bl">
+                <div className="glass hint">
+                  <b>{L.hintBold}</b>{L.hintRest}
+                </div>
               </div>
-            </div>
+            )}
+            {showParts && (
+              <Catalog lang={lang} placing={placing}
+                       onClose={() => { setShowParts(false); setPlacing(null); }}
+                       onTap={(k) => { setSelection(null); setPlacing((cur) => (cur === k ? null : k)); if (window.innerWidth <= 900) setShowParts(false); }}
+                       onDragMove={(k, x, y) => !!vp.current?.dropAt(x, y, k)?.ok}
+                       onDrop={(k, x, y) => { const tg = vp.current?.dropAt(x, y, k); vp.current?.clearDrop(); setPlacing(null); if (tg) placeItem(k, tg); }} />
+            )}
+            {placing && (
+              <div className="glass placing-bar" role="status">
+                <span>{L.placing(L.items[placing])}</span>
+                <button onClick={() => setPlacing(null)}>{L.cancel}</button>
+              </div>
+            )}
             {selection && selBox && (
               <div ref={selRef} className={"glass selbox on" + (selection.k === "cell" ? " wide" : "") + (selBox.dock ? " dock" : "")}
                    style={selBox.dock ? undefined : { left: selBox.x, top: selBox.y }}>
