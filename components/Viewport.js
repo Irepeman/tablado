@@ -13,6 +13,7 @@ import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
 import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
+import { buildDecor, clearDecor, floorTexture } from "./decor";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -26,6 +27,7 @@ import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
    misma tarjeta gráfica que el visor normal, también en Safari y en móviles:
    el trazador de rutas que había antes salía negro en Macs con chip Apple. */
 const PHOTO_FRAMES = 96;
+const APERTURE = 0.03;      // m: desenfoque suave del fondo, como una cámara a f/4
 const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
 const QUAD_VS = "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }";
 
@@ -99,6 +101,16 @@ const Viewport = forwardRef(function Viewport(
     wall.receiveShadow = true;
     scene.add(wall);
 
+    const floorBase = floor.material;
+    const floorPhoto = new THREE.MeshStandardMaterial({ map: null, roughness: 0.52, metalness: 0 });
+    const skirting = new THREE.Mesh(new THREE.BoxGeometry(30, 0.08, 0.015),
+      new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.6 }));
+    skirting.visible = false;
+    skirting.receiveShadow = true;
+    scene.add(skirting);
+    const decor = new THREE.Group();
+    root.add(decor);
+
     /* silueta de 1,70 m: la referencia de escala que usa cualquier catálogo */
     const fig = new THREE.Group();
     fig.visible = false;
@@ -167,6 +179,29 @@ const Viewport = forwardRef(function Viewport(
     };
     S.current = st;
     st.key = key; st.keyBase = keyBase; st.gtao = gtao; st.composer = composer;
+    /* montar o desmontar la habitación y la decoración de la foto */
+    st.stage = (on) => {
+      const p = propsRef.current.params;
+      if (on) {
+        floorPhoto.map = floorTexture(renderer);
+        floor.material = floorPhoto;
+        const z = -p.depth / 2000 - 0.016;           // el mueble, apoyado en la pared
+        wall.position.z = z;
+        wall.material.color.set(0xebe7df);
+        skirting.position.set(0, 0.04, z + 0.0075);
+        skirting.visible = true;
+        shadowPlane.material.opacity = 0.3;
+        if (propsRef.current.exploded) clearDecor(decor);
+        else buildDecor(decor, p, st.geo);
+      } else {
+        floor.material = floorBase;
+        wall.position.z = -2.2;
+        skirting.visible = false;
+        shadowPlane.material.opacity = 0.24;
+        clearDecor(decor);
+        syncTheme();
+      }
+    };
     /* resaltado del hueco donde se va a soltar una pieza: fuera de st.meshes, no se toca */
     st.dropMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), st.dropOk);
     st.dropMesh.visible = false;
@@ -175,6 +210,7 @@ const Viewport = forwardRef(function Viewport(
 
     /* ----- tema: el fondo del visor sigue al de la página ----- */
     const syncTheme = () => {
+      if (S.current?.photoOn) return;               // la foto siempre es una habitación clara
       const cs = getComputedStyle(document.documentElement);
       const bg = cs.getPropertyValue("--paper-3").trim() || "#e7e4da";
       const col = new THREE.Color(bg);
@@ -614,12 +650,22 @@ const Viewport = forwardRef(function Viewport(
         } else if (ph.n < PHOTO_FRAMES) {
           const i = ph.n + 1;
           camera.setViewOffset(bw, bh, halton(i, 2) - 0.5, halton(i, 3) - 0.5, bw, bh);
-          const ang = i * 2.39996, rad = Math.sqrt(i / PHOTO_FRAMES) * 0.5;   // espiral de Fibonacci
-          key.position.set(keyBase.x + Math.cos(ang) * rad, keyBase.y, keyBase.z + Math.sin(ang) * rad);
+          /* luz de ventana: la principal repartida en un disco de 1,2 m (sombras muy suaves) */
+          const ang = i * 2.39996, rad = Math.sqrt(i / PHOTO_FRAMES) * 1.2;   // espiral de Fibonacci
+          key.position.set(keyBase.x + Math.cos(ang) * rad, keyBase.y + Math.sin(ang) * rad * 0.6, keyBase.z + Math.sin(ang) * rad);
+          /* objetivo: la cámara se mueve por la apertura mirando al mueble; lo lejano se desenfoca */
+          const la = i * 2.39996 + 1.3, lr = Math.sqrt(i / PHOTO_FRAMES) * APERTURE;
+          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+          camera.position.addScaledVector(right, Math.cos(la) * lr).addScaledVector(up, Math.sin(la) * lr);
+          camera.lookAt(st.cam.target);
+          camera.updateMatrixWorld();
           composer.renderToScreen = false;
           composer.render();
           composer.renderToScreen = true;
           camera.clearViewOffset();
+          writeCam();
+          camera.updateMatrixWorld();
           key.position.copy(keyBase);
           ph.accMat.uniforms.tAcc.value = ph.accA.texture;
           ph.accMat.uniforms.tNew.value = composer.readBuffer.texture;
@@ -899,6 +945,7 @@ const Viewport = forwardRef(function Viewport(
     st.fig.position.set((p.width / 2 + 560) / 1000, 0, p.depth / 2000);
     st.fig.visible = !!showScale && !st.photoOn;
     if (st.ph) st.ph.dirty = true;   // la foto vuelve a empezar si cambia el mueble
+    if (st.photoOn) st.stage(true);
   }, [params, selection, exploded, showScale, open]);
 
   /* ---------- modo foto: acumulación ---------- */
@@ -925,7 +972,12 @@ const Viewport = forwardRef(function Viewport(
         const copyMat = new THREE.ShaderMaterial({
           uniforms: { t: { value: null } },
           vertexShader: QUAD_VS,
-          fragmentShader: "uniform sampler2D t; varying vec2 vUv; void main() { gl_FragColor = texture2D(t, vUv); }",
+          fragmentShader: "uniform sampler2D t; varying vec2 vUv; void main() {" +
+            " vec3 c = texture2D(t, vUv).rgb;" +
+            " c = mix(c, c * c * (3.0 - 2.0 * c), 0.2);" +
+            " c *= vec3(1.02, 1.0, 0.97);" +
+            " c *= mix(1.0, 0.8, smoothstep(0.38, 0.9, distance(vUv, vec2(0.5)) * 1.15));" +
+            " gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0); }",
           depthTest: false, depthWrite: false,
         });
         st.ph = { accA: rt(), accB: rt(), accMat, copyMat, accQuad: new FullScreenQuad(accMat), copyQuad: new FullScreenQuad(copyMat),
@@ -934,12 +986,16 @@ const Viewport = forwardRef(function Viewport(
       st.ph.dirty = true;
       st.gtaoWas = st.gtao.enabled;
       st.gtao.enabled = true;               // en la foto, siempre con oclusión ambiental
+      st.gtao.updateGtaoMaterial({ radius: 0.35 });
       setShadow(4096);
-      st.fig.visible = false;
       st.photoOn = true;
+      st.stage(true);
+      st.fig.visible = false;
     } else if (st.photoOn) {
       st.photoOn = false;
+      st.stage(false);
       st.gtao.enabled = st.gtaoWas;
+      st.gtao.updateGtaoMaterial({ radius: 0.2 });
       setShadow(2048);
       st.fig.visible = !!propsRef.current.showScale;
       propsRef.current.onPhotoProgress?.(0);
