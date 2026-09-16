@@ -257,6 +257,8 @@ const Viewport = forwardRef(function Viewport(
     const targetAt = (clientX, clientY) => {
       const r = canvas.getBoundingClientRect();
       if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+      /* soltar encima del catálogo o de un panel no pone nada en el hueco que queda detrás */
+      if (document.elementFromPoint(clientX, clientY) !== canvas) return null;
       st.ptr.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
       st.ray.setFromCamera(st.ptr, camera);
       const p = propsRef.current.params, geo = st.geo;
@@ -360,6 +362,7 @@ const Viewport = forwardRef(function Viewport(
         st.move = { from: { col: sel.col, cell: sel.cell }, to: null };
         return;
       }
+      if (propsRef.current.placing) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza
       if (hit && hit.object.userData.drag && e.button === 0) {
         const u = hit.object.userData;
         const p = propsRef.current.params;
@@ -388,7 +391,7 @@ const Viewport = forwardRef(function Viewport(
       if (st.mode === "move" && st.move) {
         st.moved += Math.abs(e.clientX - st.last.x) + Math.abs(e.clientY - st.last.y);
         st.last = { x: e.clientX, y: e.clientY };
-        if (st.moved > 6) {
+        if (st.moved > 12) {
           const tg = targetAt(e.clientX, e.clientY);
           const src = propsRef.current.params.columns[st.move.from.col].cells[st.move.from.cell];
           const same = tg && tg.col === st.move.from.col && tg.cell === st.move.from.cell;
@@ -468,7 +471,7 @@ const Viewport = forwardRef(function Viewport(
       if (st.mode === "move" && st.move) {
         showDrop(null);
         canvas.style.cursor = propsRef.current.placing ? "copy" : "";
-        if (st.moved > 6) {
+        if (st.moved > 12) {
           if (st.move.to && e.type === "pointerup") propsRef.current.onMoveCell?.(st.move.from, st.move.to);
         } else {
           const hit = pickAt(e);
@@ -478,7 +481,7 @@ const Viewport = forwardRef(function Viewport(
         st.mode = null;
         return;
       }
-      if (st.mode === "orbit" && st.moved < 5 && e.type === "pointerup" && propsRef.current.placing) {
+      if (st.mode === "orbit" && st.moved < 9 && e.type === "pointerup" && propsRef.current.placing) {
         /* modo colocar: el toque pone la pieza en vez de elegir */
         showDrop(null);
         propsRef.current.onPlace?.(targetAt(e.clientX, e.clientY));
@@ -964,6 +967,16 @@ const Viewport = forwardRef(function Viewport(
       return tg ? { ...tg, ok } : null;
     },
     clearDrop() { S.current?.showDrop?.(null); },
+    flash(target, item) {
+      const st = S.current;
+      if (!st?.showDrop) return;
+      clearTimeout(st.flashT);
+      /* tras reconstruir la malla (el hueco puede haber cambiado de tamaño) */
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        st.showDrop(target, true, item);
+        st.flashT = setTimeout(() => st.showDrop(null), 700);
+      }));
+    },
     projectBox(part) {
       const st = S.current;
       if (!st || !part?.pos) return null;

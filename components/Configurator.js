@@ -20,7 +20,7 @@ import Catalog from "./Catalog";
 import {
   DEFAULT, normalize, build, validate,
   maxSpan, deepCopy, clamp, setCell, isRail, cellBounds, cellAtHeight, PRESETS,
-  canPlace, applyItem, moveCell,
+  canPlace, applyItem, moveCell, isDoor, setOwnDoor,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
@@ -357,8 +357,8 @@ export default function Configurator() {
     if (!r.ok) { flash(why(r)); return false; }
     onCommitEdit(n);
     flash(L.placed(L.items[item]) + (r.deeper ? ` · ${L.deeper}` : ""));
-    if (!item.startsWith("h:") && item !== "divider" && tg.cell != null) setSelection({ k: "cell", col: tg.col, cell: tg.cell });
-    else setSelection(null);
+    setSelection(null);
+    vp.current?.flash(item.startsWith("h:") ? tg : { col: tg.col, cell: tg.cell }, item);
     return true;
   };
   const onMoveCell = (from, to) => {
@@ -379,7 +379,9 @@ export default function Configurator() {
     const pick = (type) => {
       const n = deepCopy(params);
       if (type === "rail+door") {
+        const wasDoor = isDoor(n.columns[selection.col].cells[j]);
         setCell(n, n.columns[selection.col], j, type, n.columns);
+        if (!wasDoor) setOwnDoor(n.columns[selection.col], j);
         if (n.depth < 500) n.depth = 580;                       // para colgar hacen falta 500 mm
       } else if (!applyItem(n, type, selection.col, j).ok) return;
       onCommitEdit(n);
@@ -392,7 +394,9 @@ export default function Configurator() {
         if (i === selection.col) return;
         const jj = cellAtHeight(n, cc, mid);
         if (!canPlace(n, type, i, jj).ok) return;                // donde no cabe, se deja
+        const wasDoor = isDoor(cc.cells[jj]);
         setCell(n, cc, jj, type, n.columns);
+        if (isDoor(type) && !wasDoor) setOwnDoor(cc, jj);
       });
       if (isRail(type) && n.depth < 500) n.depth = 580;
       onCommitEdit(n);

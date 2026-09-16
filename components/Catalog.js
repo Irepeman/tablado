@@ -48,7 +48,7 @@ export default function Catalog({ lang, placing, onTap, onDragMove, onDrop, onCl
     e.preventDefault();
     const d = { item, x0: e.clientX, y0: e.clientY, on: false };
     const move = (ev) => {
-      if (!d.on && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) < 6) return;
+      if (!d.on && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) < 8) return;
       d.on = true;
       const ok = onDragMove(item, ev.clientX, ev.clientY);
       setGhost({ item, x: ev.clientX, y: ev.clientY, ok });
