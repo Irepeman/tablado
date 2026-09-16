@@ -145,7 +145,7 @@ const even = (c, floor) => {
   const gaps = pts.slice(1).map((v, i) => v - pts[i]);
   return gaps.length > 0 && Math.max(...gaps) - Math.min(...gaps) <= 2;
 };
-conv(["quiero cajones", "en todos los cuadros"], ({ a }) => allCols(a, (c) => c.drawers === 2));
+conv(["quiero cajones", "en todos los cuadros"], ({ a }) => allCols(a, (c) => c.cells.every((x) => x.startsWith("drawer"))));
 conv(["quiero cajones"], ({ a, r }) => col(a, 0).drawers === 2 && /columna 1/.test(r.changes.join(" ")) && r.suggest?.length === 2);
 conv(["quiero cajones"], ({ a }) => col(a, 0).cells[0] === "drawer2" && col(a, 0).shelves.join() === col(a, 1).shelves.join());
 conv(["quiero cajones", "mejor a la derecha"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0);

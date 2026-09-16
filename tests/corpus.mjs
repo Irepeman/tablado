@@ -200,6 +200,19 @@ es("pon una barra de colgar", hasRail);
 es("para colgar ropa", hasRail);
 es("quita la barra", ({ a }) => a.columns.every((c) => !c.cells.some((x) => x.startsWith("rail"))), (p) => { p.columns[0].cells = ["rail", "open"]; p.columns[0].shelves = [1500]; });
 es("un armario blanco de 2 metros", ({ a }) => a.material === "melamina_blanca" && a.width === 2000 && a.depth >= 580);
+/* la frase de la captura: todos los huecos, también partiendo de la librería con puertas */
+const everyCell = (re) => ({ a }) => all(a, (c) => c.cells.every((x) => re.test(x)));
+es("cajones en todos los huecos", ({ a }) => all(a, (c) => c.cells.every((x) => x === "drawer")));
+es("cajones en todos los huecos", ({ a }) => everyCell(/^drawer/)({ a }) && all(a, (c) => !c.door),
+   (p) => p.columns.forEach((c) => { c.cells = ["door", "open", "open", "open"]; }));
+es("un cajón en cada hueco", ({ a }) => all(a, (c) => c.cells.every((x) => x === "drawer")));
+es("puertas en todos los huecos", everyCell(/^door$/));
+es("cajones en todos los huecos de la primera columna", ({ a }) => col(a, 0).cells.every((x) => /^drawer/.test(x)) && col(a, 1).drawers === 0);
+es("cajones en todos los huecos menos en la primera", ({ a }) => col(a, 0).drawers === 0 && col(a, 3).cells.every((x) => /^drawer/.test(x)));
+es("cajones en todos los huecos de abajo", ({ a }) => all(a, (c) => /^drawer/.test(c.cells[0]) && c.cells[1] === "open"));
+es(["quiero cajones", "en todos los huecos"], everyCell(/^drawer/));
+en("drawers in every compartment", everyCell(/^drawer/));
+en("a drawer in each cubby", ({ a }) => all(a, (c) => c.cells.every((x) => x === "drawer")));
 es(["quiero cajones", "en los cuadrados de abajo"], ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1));
 
 /* =================== ENGLISH =================== */

@@ -142,7 +142,7 @@ function conv(msgs, expect, setup) {
   const leak = [...texts(res), ...((res && res.suggest) || [])].find((x) => SPANISH.test(x));
   if (leak) fails.push(`«${msgs.join(" → ")}» leaks Spanish: «${leak}»`);
 }
-conv(["I want drawers", "in all the boxes"], ({ a }) => allCols(a, (c) => c.drawers === 2));
+conv(["I want drawers", "in all the boxes"], ({ a }) => allCols(a, (c) => c.cells.every((x) => x.startsWith("drawer"))));
 conv(["I want drawers"], ({ a, r }) => col(a, 0).drawers === 2 && /column 1/.test(r.changes.join(" ")) && r.suggest?.length === 2);
 conv(["I want drawers", "move them to the right"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0);
 conv(["add doors to the first column", "the third one too"], ({ a }) => col(a, 0).door && col(a, 2).door && !col(a, 1).door);
