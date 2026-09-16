@@ -17,6 +17,7 @@ import Viewport from "./Viewport";
 import Chat from "./Chat";
 import SpecRail from "./SpecRail";
 import Catalog from "./Catalog";
+import PhotoImport from "./PhotoImport";
 import {
   DEFAULT, normalize, build, validate,
   maxSpan, deepCopy, clamp, setCell, isRail, cellBounds, cellAtHeight, PRESETS,
@@ -79,6 +80,7 @@ export default function Configurator() {
   const [photoSamples, setPhotoSamples] = useState(0);
   const [openView, setOpenView] = useState(false);
   const [showParts, setShowParts] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);   // { file, hint }
   const [placing, setPlacing] = useState(null);      // pieza del catálogo esperando un toque en un hueco
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
@@ -494,7 +496,8 @@ export default function Configurator() {
 
       <div className="main">
         <div className={"rail-wrap" + (tab === "chat" ? "" : " hide-sm")}>
-          <Chat messages={messages} busy={busy} onSend={send} lang={lang} />
+          <Chat messages={messages} busy={busy} onSend={send} lang={lang}
+                onPhoto={(file, hint) => setPhotoFile({ file, hint })} />
         </div>
 
         <section className="stage">
@@ -588,6 +591,25 @@ export default function Configurator() {
         </div>
       </div>
 
+      {photoFile && (
+        <PhotoImport file={photoFile.file} hint={photoFile.hint} lang={lang}
+          onCancel={() => setPhotoFile(null)}
+          onCreate={(next, sum) => {
+            pristine.current = false;
+            history.current.push(deepCopy(params));
+            setParams(next);
+            setSelection(null);
+            setPhoto(false);
+            convo.current = {};
+            const url = URL.createObjectURL(photoFile.file);
+            say({ role: "you", text: photoFile.hint, image: url });
+            say({ role: "ai", text: L.photoDone(L.photoFound(sum)), chips: diffChips(params, next, lang),
+                  suggest: lang === "en" ? ["Make it white", "In walnut", "No back panel"] : ["Hazla blanca", "En nogal", "Sin trasera"] });
+            setPhotoFile(null);
+            setTab("spec");
+            setTimeout(() => vp.current?.frame("34"), 40);
+          }} />
+      )}
       {modal && (
         <div className="veil on" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <div className="modal">

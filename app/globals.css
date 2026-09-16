@@ -358,3 +358,29 @@ table.cut .r{text-align:right}
 }
 /* móvil: las medidas bajo la barra del visor, que ya no caben al lado */
 @media (max-width:900px){ .vp-tl{top:54px;max-width:calc(100% - 24px)} }
+
+/* ---------- crear desde una foto ---------- */
+.composer .photo-pick{flex:none;width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--line-2);
+  border-radius:var(--radius);background:var(--field);color:var(--ink-2)}
+.composer .photo-pick:hover:not(:disabled){border-color:var(--pine);color:var(--pine)}
+.msg-img{display:block;max-width:180px;max-height:180px;border-radius:5px;margin-bottom:5px;object-fit:cover}
+.photo-modal{width:min(1040px,94vw);max-height:92vh;overflow:auto}
+.photo-body{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(250px,1fr);gap:18px;align-items:start}
+.photo-stage{background:var(--paper-3);border-radius:6px;overflow:hidden;touch-action:none}
+.photo-svg{display:block;width:100%;height:auto;max-height:66vh;user-select:none}
+.photo-svg .pq{fill:rgba(46,94,66,.08);stroke:#fff;stroke-width:.35%;stroke-dasharray:1.2% .8%;vector-effect:none}
+.photo-svg .pl{stroke:#3fd07a;stroke-width:.45%;opacity:.95}
+.photo-svg .pl.h{stroke:#ffcf4a}
+.photo-svg .plab{fill:#fff;text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:rgba(0,0,0,.55);stroke-width:.25%}
+.photo-svg .ph{fill:#fff;stroke:var(--pine);stroke-width:.5%;cursor:grab}
+.photo-side{display:flex;flex-direction:column;gap:12px}
+.photo-sum{font-size:13px;font-weight:600;color:var(--ink);padding:9px 11px;border-radius:var(--radius);background:var(--pine-soft)}
+.photo-fields{display:grid;gap:7px}
+.pf{display:grid;grid-template-columns:78px minmax(0,1fr) 26px;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2)}
+.pf em{font-style:normal;font-size:11px;color:var(--ink-3)}
+.pf .sel{grid-column:2 / 4}
+.photo-actions{display:flex;gap:8px;margin-top:4px}
+.photo-actions .ghost{flex:1;border:1px solid var(--line-2);border-radius:var(--radius);background:var(--field);color:var(--ink-2)}
+.photo-actions .cta{flex:2;margin:0}
+.photo-err{color:#b0412b}
+@media (max-width:900px){ .photo-body{grid-template-columns:1fr} .photo-modal{padding:16px} }
