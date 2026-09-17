@@ -165,7 +165,8 @@ export default function Configurator() {
     const tick = () => {
       const geo = vp.current?.geo();
       const part = selection.k === "cell" ? vp.current?.cellPart(selection.col, selection.cell) : geo?.parts.find((x) =>
-        selection.k === "shelf"
+        selection.k === "rail" ? x.grp === "barra" && x.col === selection.col && x.cell === selection.cell
+        : selection.k === "shelf"
           ? x.grp === "balda" && x.col === selection.col && x.shelf === selection.shelf
           : x.grp === "divisor" && x.div === selection.div);
       const r = part && vp.current?.projectBox(part);
@@ -345,6 +346,54 @@ export default function Configurator() {
           <button className="kill" onClick={() => {
             const n = deepCopy(params);
             n.columns[selection.col].shelves.splice(selection.shelf, 1);
+            setSelection(null); onCommitEdit(n);
+          }}>{L.remove}</button>
+        </div>
+      </>
+    );
+  };
+
+  /* ---------------- barra de colgar: altura ----------------
+     La barra va 60 mm bajo la balda de encima, así que su altura se cambia
+     moviendo esa balda. Se mide desde el suelo, como se mide en casa. */
+  const railBox = () => {
+    const c = params.columns[selection.col];
+    const j = selection.cell;
+    if (!c || !isRail(c.cells[j])) return null;
+    const t = params.thickness, off = params.baseHeight + t - t / 2 - 60;
+    const movable = j < c.shelves.length;
+    const railY = Math.round((movable ? c.shelves[j] : params.height - params.baseHeight - 2 * t) + off);
+    const lower = j > 0 ? c.shelves[j - 1] + t / 2 : 0;
+    const Hi = params.height - params.baseHeight - 2 * t;
+    const set = (y) => {
+      if (!movable || !Number.isFinite(y)) return;
+      const v = clamp(Math.round(y - off), lower + 600 + t / 2, Hi - 140);
+      const others = c.shelves.filter((_, i) => i !== j);
+      if (!others.every((o) => Math.abs(o - v) >= 140)) { flash(L.railBlocked); return; }
+      const n = deepCopy(params);
+      n.columns[selection.col].shelves[j] = v;
+      onCommitEdit(n);
+    };
+    return (
+      <>
+        <h4>{L.railTitle(selection.col + 1)}</h4>
+        <div className="selrow">
+          <label>{L.height}</label>
+          <input className="numin mono" defaultValue={railY} key={railY} disabled={!movable}
+                 onBlur={(e) => set(Number(e.target.value))}
+                 onKeyDown={(e) => e.key === "Enter" && set(Number(e.target.value))} />
+          <span style={{ fontSize: 11, color: "var(--ink-3)" }}>mm</span>
+          <div className="stepper">
+            <button disabled={!movable} onClick={() => set(railY - 32)}>−</button>
+            <button disabled={!movable} onClick={() => set(railY + 32)}>+</button>
+          </div>
+        </div>
+        <p className="cellnote">{movable ? L.railHelp(mm(railY - params.baseHeight - t - lower)) : L.railTop}</p>
+        <div className="selrow">
+          <button className="kill" onClick={() => {
+            const n = deepCopy(params);
+            const cc = n.columns[selection.col];
+            cc.cells[j] = cc.cells[j] === "rail+door" ? "door" : "open";
             setSelection(null); onCommitEdit(n);
           }}>{L.remove}</button>
         </div>
@@ -591,7 +640,7 @@ export default function Configurator() {
             {selection && selBox && (
               <div ref={selRef} className={"glass selbox on" + (selection.k === "cell" ? " wide" : "") + (selBox.dock ? " dock" : "")}
                    style={selBox.dock ? undefined : { left: selBox.x, top: selBox.y }}>
-                {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox() : divBox()}
+                {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox() : selection.k === "rail" ? railBox() : divBox()}
               </div>
             )}
           </div>

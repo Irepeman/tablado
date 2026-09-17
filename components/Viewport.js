@@ -157,6 +157,8 @@ const Viewport = forwardRef(function Viewport(
       meshes: [], geo: null, grain: {}, mats: {},
       metalMat: new THREE.MeshStandardMaterial({ color: 0x2b2b28, roughness: 0.36, metalness: 0.85 }),
       chromeMat: new THREE.MeshStandardMaterial({ color: 0xd9d9d6, roughness: 0.22, metalness: 1 }),
+      railSelMat: new THREE.MeshStandardMaterial({ color: 0xc97a3c, roughness: 0.35, metalness: 0.4,
+        emissive: new THREE.Color(0x8a3f12), emissiveIntensity: 0.3 }),
       brassMat: new THREE.MeshStandardMaterial({ color: 0xc19a5b, roughness: 0.3, metalness: 1 }),
       aluMat: new THREE.MeshStandardMaterial({ color: 0xbfc2c3, roughness: 0.38, metalness: 1 }),
       recessMat: new THREE.MeshStandardMaterial({ color: 0x151513, roughness: 0.55, metalness: 0.4 }),
@@ -283,6 +285,8 @@ const Viewport = forwardRef(function Viewport(
       if (!hits.length) return null;
       const first = hits[0];
       const solid = hits.find((h) => h.object.userData?.grp !== "hueco");
+      /* la barra de colgar es fina y está al fondo: si el rayo la toca, es que se apunta a ella */
+      if (solid && solid.object.userData.grp === "barra") return solid;
       if (solid && solid.object.userData.drag && solid.distance - first.distance < 0.07) return solid;
       if (first.object.userData?.grp === "hueco") return first;
       return solid || first;
@@ -375,6 +379,7 @@ const Viewport = forwardRef(function Viewport(
     const selectFrom = (u) => {
       const { onSelect } = propsRef.current;
       if (u && u.grp === "balda") onSelect({ k: "shelf", col: u.col, shelf: u.shelf });
+      else if (u && u.grp === "barra") onSelect({ k: "rail", col: u.col, cell: u.cell });
       else if (u && u.grp === "divisor") onSelect({ k: "div", div: u.div });
       else if (u && u.col != null && u.cell != null) onSelect({ k: "cell", col: u.col, cell: u.cell });
       else onSelect(null);
@@ -423,6 +428,26 @@ const Viewport = forwardRef(function Viewport(
         return;
       }
       if (propsRef.current.placing) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza
+      const hu0 = hit && hit.object.userData;
+      if (hu0 && hu0.grp === "barra" && e.button === 0) {
+        /* la barra cuelga de la balda de encima: arrastrarla sube o baja esa balda.
+           En el hueco de arriba del todo no hay balda que mover: solo se elige. */
+        const p = propsRef.current.params, c = p.columns[hu0.col];
+        if (c && hu0.cell < c.shelves.length) {
+          const n = camera.getWorldDirection(new THREE.Vector3()).negate();
+          st.dragPlane.setFromNormalAndCoplanarPoint(n, hit.point);
+          st.ray.ray.intersectPlane(st.dragPlane, st.hitPt);
+          const lower = hu0.cell > 0 ? c.shelves[hu0.cell - 1] + p.thickness / 2 : 0;
+          st.drag = {
+            u: { ...hu0, shelf: hu0.cell }, axis: "y", start: st.hitPt.clone(),
+            base: c.shelves[hu0.cell], baseNext: 0, snap: deepCopy(p),
+            min: lower + 600 + p.thickness / 2,           // la barra necesita 60 cm libres debajo
+          };
+          st.mode = "drag";
+        } else st.mode = "orbit";
+        selectFrom(hu0);
+        return;
+      }
       if (hit && hit.object.userData.drag && e.button === 0) {
         const u = hit.object.userData;
         const p = propsRef.current.params;
@@ -497,7 +522,7 @@ const Viewport = forwardRef(function Viewport(
           const others = c.shelves.filter((_, i) => i !== st.drag.u.shelf);
           const fl = 0;
           // salto de 32 mm: el sistema 32 real de ebanistería
-          const v = clamp(Math.round((st.drag.base + d) / 32) * 32, fl + 140, Hi - 140);
+          const v = clamp(Math.round((st.drag.base + d) / 32) * 32, Math.max(fl + 140, st.drag.min || 0), Hi - 140);
           if (others.every((o) => Math.abs(o - v) >= 140)) {
             c.shelves[st.drag.u.shelf] = v;
             propsRef.current.onChange(p);
@@ -830,7 +855,8 @@ const Viewport = forwardRef(function Viewport(
     };
     const rail = (part) => {
       const [px, py, pz] = part.pos;
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0125, 0.0125, part.L / 1000, 24), st.chromeMat);
+      const selR = selection && selection.k === "rail" && selection.col === part.col && selection.cell === part.cell;
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0125, 0.0125, part.L / 1000, 24), selR ? st.railSelMat : st.chromeMat);
       bar.rotation.z = Math.PI / 2;
       bar.position.set(px / 1000, py / 1000, pz / 1000);
       bar.castShadow = true;
