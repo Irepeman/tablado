@@ -43,6 +43,14 @@ t("Tengo un hueco de 1,90 en el pasillo, entre la puerta del baño y la pared. Q
     allCols(a, (c) => !c.cells.some((x) => x.startsWith("rail")) && c.drawers === 2 && c.door && c.width <= maxSpan(a.material, a.thickness)));
 t("un armario para la ropa", ({ a }) => a.columns.some((c) => c.cells.some((x) => x.startsWith("rail"))) && a.depth >= 580);
 t("armario de 2 metros de ancho y 60 de fondo", ({ a }) => a.width === 2000 && a.depth === 600);
+/* armario por zonas: pared y techo leídos bien (no «12 años»), colgar + baldas, cajones interiores que no desaparecen */
+t("Es para el dormitorio de mi hija, que tiene 12 años. La pared mide 2,40 y el techo está a 2,50. Quiero un armario lo más alto posible, en roble, con patas. Necesita una parte para colgar vestidos largos y otra con baldas para jerséis, y un par de cajones por dentro para la ropa interior. Pomos en vez de tiradores.",
+  ({ a }) => a.width === 2390 && a.height === 2410 && a.material === "roble" && a.base === "patas" && a.handle === "knob" &&
+    a.columns.some((c) => c.cells.some((x) => x.startsWith("rail"))) &&
+    a.columns.some((c) => !c.cells.some((x) => x.startsWith("rail")) && c.shelves.length >= 3) &&
+    a.columns.reduce((q, c) => q + c.cells.filter((x) => x === "door+drawer").length, 0) === 2 &&
+    allCols(a, (c) => c.width <= 1000));
+t("que quepa en un hueco de 2,10", ({ a }) => a.width === 2090);
 /* zócalo: cambia su altura, no la del mueble */
 t("quiero que el zócalo sea más corto", ({ a, b }) => a.base === "zocalo" && a.baseHeight < 80 && a.height === b.height, (p) => { p.base = "zocalo"; p.baseHeight = 80; });
 t("que el zócalo sea de 10cm", ({ a, b }) => a.base === "zocalo" && a.baseHeight === 100 && a.height === b.height);

@@ -168,6 +168,12 @@ for (const s of ALL_SUGGESTIONS_EN) {
 t("make the plinth 10 cm", ({ a, b }) => a.base === "zocalo" && a.baseHeight === 100 && a.height === b.height);
 t("lower plinth", ({ a, b }) => a.base === "zocalo" && a.baseHeight < 80 && a.height === b.height, (p) => { p.base = "zocalo"; p.baseHeight = 80; });
 
+/* zoned wardrobe */
+t("A wardrobe with a hanging section for long dresses and shelves for jumpers, and two drawers inside",
+  ({ a }) => a.columns.some((c) => c.cells.some((x) => x.startsWith("rail"))) &&
+    a.columns.some((c) => !c.cells.some((x) => x.startsWith("rail")) && c.shelves.length >= 3) &&
+    a.columns.reduce((q, c) => q + c.cells.filter((x) => x === "door+drawer").length, 0) === 2);
+
 console.log(`\nchat EN: ${n} phrases · ${fails.length} failures\n`);
 fails.forEach((f) => console.log("  ✗ " + f));
 process.exit(fails.length ? 1 : 0);
