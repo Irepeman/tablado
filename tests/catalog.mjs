@@ -130,6 +130,14 @@ for (let run = 0; run < 400; run++) {
   if (!w2.columns[0].cells.some(hasBox) || !w2.columns[0].cells.some(isRail)) fail("cajón interior", `el cajón interior quita la barra o no se pone: ${JSON.stringify(w2.columns[0].cells)}`);
 }
 {
+  /* armario: llevar la puerta alta a otro hueco de la misma puerta no hace nada (antes vaciaba el de origen) */
+  n++;
+  const p = PRESETS.armario(normalize({}));
+  const before = shape(p);
+  const r = moveCell(p, { col: 1, cell: 1 }, { col: 1, cell: 2 });
+  if (r.ok || shape(normalize(p)) !== before) fail("mover", `mover la puerta sobre sí misma cambia el armario: ${JSON.stringify(p.columns[1].cells)}`);
+}
+{
   /* una columna ancha con puerta: dos hojas, nunca una tercera sin costado donde colgarse */
   n++;
   const p = normalize({ width: 1500, columns: [{ width: 1464, shelves: [], cells: ["door"] }] });

@@ -417,6 +417,7 @@ const Viewport = forwardRef(function Viewport(
       st.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (st.pointers.size === 2) {
         st.drag = null; st.mode = "pinch";
+        if (st.move) { st.move = null; showDrop(null); canvas.style.cursor = ""; }
         const [a, b] = [...st.pointers.values()];
         st.pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
         st.pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -431,17 +432,17 @@ const Viewport = forwardRef(function Viewport(
       /* con un hueco elegido, arrastrar su frente, su barra o su tirador lo lleva a otro hueco */
       const sel = propsRef.current.selection, hu = hit && hit.object.userData;
       /* la barra no: arrastrarla cambia su altura (más abajo) */
+      /* una puerta no: tocarla la abre o la cierra, y un toque largo en una puerta la llevaba a otro hueco */
       const own = sel && sel.k === "cell" && hu && hu.col === sel.col && e.button === 0 && !propsRef.current.placing &&
-        !propsRef.current.photo && ["frente", "cajon", "hueco"].includes(hu.grp) &&
+        !propsRef.current.photo && ["frente", "cajon", "hueco"].includes(hu.grp) && !hu.hinge &&
         (hu.cells ? sel.cell >= hu.cells[0] && sel.cell <= hu.cells[1] : hu.cell === sel.cell) &&
         (propsRef.current.params.columns[sel.col]?.cells[sel.cell] || "open") !== "open";
       if (own) {
         st.mode = "move";
-        /* mover lo que hay en un hueco tiene que ser a propósito: con el dedo, mantener pulsado
-           un momento; con ratón o trackpad, arrastrar un buen trecho. Antes bastaban 12 px y un
-           toque algo movido llevaba los cajones al hueco de al lado sin querer. */
-        st.move = { from: { col: sel.col, cell: sel.cell }, to: null, t0: performance.now(),
-                    touch: e.pointerType !== "mouse", armed: false };
+        /* mover lo que hay en un hueco tiene que ser a propósito: mantener pulsado quieto un
+           momento y luego arrastrar, con el dedo, el ratón o el trackpad. Arrastrar sin esperar
+           es girar el mueble: antes, con trackpad, girar desde un hueco elegido lo movía. */
+        st.move = { from: { col: sel.col, cell: sel.cell }, to: null, t0: performance.now(), armed: false };
         return;
       }
       if (propsRef.current.placing || propsRef.current.photo) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza · foto: solo mirar
@@ -490,14 +491,15 @@ const Viewport = forwardRef(function Viewport(
         st.last = { x: e.clientX, y: e.clientY };
         if (!st.move.armed) {
           const held = performance.now() - st.move.t0;
-          if (st.move.touch && st.moved > 10 && held < 350) {
-            /* el dedo se ha movido sin mantener pulsado: es un giro, no un traslado */
+          if (st.moved > 8 && held < 350) {
+            /* se ha movido sin mantener pulsado: es un giro, no un traslado */
             st.move = null; st.mode = "orbit";
             return;
           }
-          if (st.move.touch ? held >= 350 : st.moved > 40) st.move.armed = true;
+          if (held >= 350) { st.move.armed = true; st.move.at = st.moved; }
         }
-        if (st.move.armed) {
+        /* y ya cogido, hace falta arrastrarlo de verdad: el temblor del dedo no lo suelta en el hueco de al lado */
+        if (st.move.armed && st.moved - st.move.at > 24) {
           const tg = targetAt(e.clientX, e.clientY);
           const src = propsRef.current.params.columns[st.move.from.col].cells[st.move.from.cell];
           const same = tg && tg.col === st.move.from.col && tg.cell === st.move.from.cell;
