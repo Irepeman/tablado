@@ -164,6 +164,10 @@ for (const s of ALL_SUGGESTIONS_EN) {
   if (!works) fails.push(`suggestion «${s}» does nothing when tapped → ${describe(r)}`);
 }
 
+/* plinth height, not unit height */
+t("make the plinth 10 cm", ({ a, b }) => a.base === "zocalo" && a.baseHeight === 100 && a.height === b.height);
+t("lower plinth", ({ a, b }) => a.base === "zocalo" && a.baseHeight < 80 && a.height === b.height, (p) => { p.base = "zocalo"; p.baseHeight = 80; });
+
 console.log(`\nchat EN: ${n} phrases · ${fails.length} failures\n`);
 fails.forEach((f) => console.log("  ✗ " + f));
 process.exit(fails.length ? 1 : 0);

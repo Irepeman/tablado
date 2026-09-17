@@ -85,11 +85,14 @@ export default function Configurator() {
   const [photoFile, setPhotoFile] = useState(null);   // { file, hint }
   const [placing, setPlacing] = useState(null);      // pieza del catálogo esperando un toque en un hueco
   const [dragItem, setDragItem] = useState(null);    // pieza del catálogo que se está arrastrando
-  const [openCols, setOpenCols] = useState([]);      // columnas con la puerta abierta (tocándola)
-  const toggleDoor = useCallback((col, on) => {
+  const [openDoors, setOpenDoors] = useState([]);    // hojas abiertas tocándolas (id de la pieza)
+  const toggleDoor = useCallback((id, on) => {
     if (!on) setOpenView(false);
-    setOpenCols((xs) => (on ? (xs.includes(col) ? xs : [...xs, col]) : xs.filter((x) => x !== col)));
+    setOpenDoors((xs) => (on ? (xs.includes(id) ? xs : [...xs, id]) : xs.filter((x) => x !== id)));
   }, []);
+  /* hojas de la puerta que cubre un hueco */
+  const doorIdsAt = (col, cell) => (vp.current?.geo()?.parts || [])
+    .filter((x) => x.hinge && x.col === col && x.cells && cell >= x.cells[0] && cell <= x.cells[1]).map((x) => x.id);
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -415,7 +418,7 @@ export default function Configurator() {
     /* dentro de un hueco con puerta: la puerta se queda abierta para ver lo que se ha puesto */
     const behindDoor = INSIDE.includes(item) && item !== "divider" && tg.cell != null &&
       isDoor(params.columns[tg.col]?.cells[tg.cell]);
-    if (behindDoor) toggleDoor(tg.col, true);
+    if (behindDoor) doorIdsAt(tg.col, tg.cell).forEach((id) => toggleDoor(id, true));
     setSelection(null);
     vp.current?.flash(item.startsWith("h:") ? tg : { col: tg.col, cell: tg.cell }, item);
     return true;
@@ -475,7 +478,7 @@ export default function Configurator() {
             );
           })}
         </div>
-        {isDoor(c.cells[j]) && (openView || openCols.includes(selection.col)) && <p className="cellnote">{L.doorOpenHint}</p>}
+        {isDoor(c.cells[j]) && (openView || doorIdsAt(selection.col, j).some((id) => openDoors.includes(id))) && <p className="cellnote">{L.doorOpenHint}</p>}
         <button className="rowbtn" disabled={!canPlace(params, "shelf", selection.col, j).ok}
                 title={canPlace(params, "shelf", selection.col, j).ok ? L.itemsHelp.shelf : why(canPlace(params, "shelf", selection.col, j))}
                 onClick={() => { const n = deepCopy(params); if (applyItem(n, "shelf", selection.col, j).ok) onCommitEdit(n); }}>
@@ -490,7 +493,7 @@ export default function Configurator() {
     history.current.push(deepCopy(params));
     const next = PRESETS[k](params);
     setParams(next);
-    setOpenCols([]);
+    setOpenDoors([]);
     setSelection(null);
     convo.current = {};
     pristine.current = false;
@@ -548,7 +551,7 @@ export default function Configurator() {
           <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>{L.scale}</button>
           <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>{L.exploded}</button>
           <button className="tbtn photo-btn" aria-pressed={photo} title={L.photoTitle}
-                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); setOpenCols([]); }}>{L.photo}</button>
+                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); setOpenDoors([]); }}>{L.photo}</button>
           <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>{L.founder}</button>
           <button className="tbtn" onClick={undo}>{L.undo}</button>
         </div>
@@ -570,7 +573,7 @@ export default function Configurator() {
             exploded={exploded} showScale={showScale}
             photo={photo} onPhotoProgress={setPhotoSamples}
             open={openView || INSIDE.includes(placing) || INSIDE.includes(dragItem)}
-            openCols={openCols} onToggleDoor={toggleDoor}
+            openDoors={openDoors} onToggleDoor={toggleDoor}
             onChange={onEdit} onCommit={(snap) => { history.current.push(snap); }}
             onSelect={setSelection}
             placing={placing} canDropAt={canDropAt} onMoveCell={onMoveCell}
@@ -605,9 +608,9 @@ export default function Configurator() {
             <div className="vp-tr">
               <button className="glass pill-btn parts-btn" aria-pressed={showParts} title={L.piecesTitle}
                       onClick={() => { setShowParts((v) => !v); setPlacing(null); }}>＋ {L.piecesBtn}</button>
-              <button className="glass pill-btn" aria-pressed={openView || openCols.length > 0} title={L.openTitle}
-                      onClick={() => { if (openView || openCols.length) { setOpenView(false); setOpenCols([]); } else setOpenView(true); }}>
-                {openView || openCols.length ? L.closeDoors : L.open}
+              <button className="glass pill-btn" aria-pressed={openView || openDoors.length > 0} title={L.openTitle}
+                      onClick={() => { if (openView || openDoors.length) { setOpenView(false); setOpenDoors([]); } else setOpenView(true); }}>
+                {openView || openDoors.length ? L.closeDoors : L.open}
               </button>
               <button className="glass iconbtn" title={L.viewFront} aria-label={L.viewFront} onClick={() => vp.current?.frame("front")}>▣</button>
               <button className="glass iconbtn" title={L.view34} aria-label={L.view34} onClick={() => vp.current?.frame("34")}>◱</button>
@@ -649,7 +652,7 @@ export default function Configurator() {
             onPushHistory={(snap) => { history.current.push(snap); }}
             onOrder={(q, rows, nested) => setModal({ q, rows, nested })}
             onCsv={downloadCsv} onPreset={applyPreset}
-            onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); setOpenCols([]); vp.current?.frame("34"); }}
+            onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); setOpenDoors([]); vp.current?.frame("34"); }}
           />
         </div>
 
@@ -667,7 +670,7 @@ export default function Configurator() {
             history.current.push(deepCopy(params));
             setParams(next);
             setSelection(null);
-            setOpenCols([]);
+            setOpenDoors([]);
             setPhoto(false);
             convo.current = {};
             const url = URL.createObjectURL(photoFile.file);

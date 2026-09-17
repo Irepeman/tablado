@@ -34,13 +34,13 @@ const QUAD_VS = "varying vec2 vUv; void main() { vUv = uv; gl_Position = project
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
 
 const Viewport = forwardRef(function Viewport(
-  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open, openCols = [], onToggleDoor,
+  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open, openDoors = [], onToggleDoor,
     placing, onPlace, canDropAt, onMoveCell }, ref) {
   const canvasRef = useRef(null);
   const S = useRef(null);              // todo el estado imperativo de three.js
   const propsRef = useRef({});
   propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open,
-    openCols, onToggleDoor, placing, onPlace, canDropAt, onMoveCell };
+    openDoors, onToggleDoor, placing, onPlace, canDropAt, onMoveCell };
 
   /* ---------- montaje: escena, luces, entorno, controles ---------- */
   useEffect(() => {
@@ -393,8 +393,9 @@ const Viewport = forwardRef(function Viewport(
       const u = hit ? hit.object.userData : null;
       const pr = propsRef.current;
       if (u && u.grp === "frente" && u.hinge && !pr.exploded) {
-        const isOpen = !!pr.open || (pr.openCols || []).includes(u.col);
-        pr.onToggleDoor?.(u.col, !isOpen);
+        /* solo la hoja tocada: en un módulo con puerta alta y puerta baja, cada una va por su lado */
+        const isOpen = !!pr.open || (pr.openDoors || []).includes(u.id);
+        pr.onToggleDoor?.(u.id, !isOpen);
         if (isOpen) { pr.onSelect(null); return; }
       }
       selectFrom(u);
@@ -927,7 +928,7 @@ const Viewport = forwardRef(function Viewport(
         const pivot = new THREE.Group();
         pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz + t / 2) / 1000);
         /* abierta si se abre todo, o si se ha abierto esa puerta tocándola */
-        const openHere = openNow || (!exploded && openCols.includes(part.col));
+        const openHere = openNow || (!exploded && openDoors.includes(part.id));
         pivot.rotation.y = openHere ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
         m.position.set((-side * part.L / 2) / 1000, 0, -t / 2000);
         pivot.add(m);
@@ -1000,7 +1001,7 @@ const Viewport = forwardRef(function Viewport(
     st.fig.visible = !!showScale && !st.photoOn;
     if (st.ph) st.ph.dirty = true;   // la foto vuelve a empezar si cambia el mueble
     if (st.photoOn) st.stage(true);
-  }, [params, selection, exploded, showScale, open, openCols.join(",")]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [params, selection, exploded, showScale, open, openDoors.join(",")]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------- modo foto: acumulación ---------- */
   useEffect(() => {

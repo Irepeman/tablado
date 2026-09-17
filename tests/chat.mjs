@@ -37,6 +37,10 @@ t("vuelve atrás", ({ r }) => r?.action === "undo");
 t("hola", ask(/Hola/));
 t("¿qué puedes hacer?", ask(/medidas/));
 t("gracias", ask(/.+/));
+/* zócalo: cambia su altura, no la del mueble */
+t("quiero que el zócalo sea más corto", ({ a, b }) => a.base === "zocalo" && a.baseHeight < 80 && a.height === b.height, (p) => { p.base = "zocalo"; p.baseHeight = 80; });
+t("que el zócalo sea de 10cm", ({ a, b }) => a.base === "zocalo" && a.baseHeight === 100 && a.height === b.height);
+t("que el zócalo sea de 3cm", ({ a, r }) => a.baseHeight === 50 && r.notes.some((x) => /50 a 160/.test(x)));
 /* preguntas, con datos reales */
 t("¿cuánto cuesta?", ask(/€/));
 t("¿cuánto pesa?", ask(/kg/));
