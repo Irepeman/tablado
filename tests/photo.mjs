@@ -4,7 +4,7 @@
    y ruido), a veces en perspectiva, y se comprueba lo que se detecta.
    node tests/photo.mjs
    ============================================================ */
-import { rectify, detectStructure, toParams, homography, guessQuad, summarize } from "../lib/photo.js";
+import { rectify, detectStructure, toParams, homography, guessQuad, summarize, hintDims, mmIn } from "../lib/photo.js";
 import { normalize, deepCopy } from "../lib/model.js";
 
 let seed = 77;
@@ -111,10 +111,10 @@ function warp(img, q2) {
 
 const fails = [];
 let n = 0;
-function check(name, img, dims, expect) {
+function check(name, img, dims, expect, quad = img.quad) {
   n++;
   try {
-    const r = rectify(img, img.quad, 480);
+    const r = rectify(img, quad, 480);
     const det = detectStructure(r);
     const p = toParams(det, dims);
     const again = normalize(deepCopy(p));
@@ -178,6 +178,57 @@ check("armario de catálogo con costado izquierdo", catalog, { width: 1590, heig
 const mixed = [{ w: 1, cells: [D(), O(), O()] }, { w: 1.4, cells: [R(0.5), R(0.5), O(2), O(1)] }, { w: 1, cells: [D(), O(), O()] }];
 check("librería mixta", draw(mixed, { box: [110, 80, 790, 1020] }), { width: 2000, height: 2000 },
       { columns: 3, drawers: 2, doors: 2, open: (g) => g.open >= 5 });
+
+/* Las esquinas casi nunca caen justas: las propuestas por la app (con la línea del suelo
+   detrás) o unas algo holgadas cogen pared y suelo. Eso no puede cambiar lo detectado. */
+function flat({ wood = [184, 138, 90], wall = [233, 228, 218], line = [59, 42, 26] } = {}) {
+  const W = 1200, H = 900, data = new Uint8ClampedArray(W * H * 4);
+  const rect = (x0, y0, x1, y1, c) => { for (let y = Math.floor(y0); y < y1; y++) for (let x = Math.floor(x0); x < x1; x++) { const k = (y * W + x) * 4; data.set([...c, 255], k); } };
+  rect(0, 0, W, H, wall); rect(0, 700, W, H, [205, 191, 168]);
+  const x0 = 200, x1 = 1000, y0 = 330, y1 = 680, cw = (x1 - x0) / 3;
+  rect(x0, y0, x1, y1, wood);
+  for (let i = 1; i < 3; i++) rect(x0 + i * cw - 1.5, y0, x0 + i * cw + 1.5, y1, line);
+  for (let k = 1; k < 3; k++) rect(x0 + cw, y0 + (k * (y1 - y0)) / 3 - 1.5, x0 + 2 * cw, y0 + (k * (y1 - y0)) / 3 + 1.5, line);
+  rect(x0 + cw - 30, y0 + 140, x0 + cw - 22, y0 + 210, [34, 34, 34]); rect(x0 + 2 * cw + 22, y0 + 140, x0 + 2 * cw + 30, y0 + 210, [34, 34, 34]);
+  for (let k = 0; k < 3; k++) rect(x0 + 1.5 * cw - 35, y0 + ((k + 0.5) * (y1 - y0)) / 3 - 4, x0 + 1.5 * cw + 35, y0 + ((k + 0.5) * (y1 - y0)) / 3 + 4, [34, 34, 34]);
+  [x0 + 30, x1 - 40].forEach((x) => rect(x, y1, x + 10, y1 + 40, [17, 17, 17]));       // patas
+  return { width: W, height: H, data, quad: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] };
+}
+const pad = (img, f) => {
+  const q = img.quad, w = q[1][0] - q[0][0], h = q[3][1] - q[0][1];
+  return [[-f, -f], [f, -f], [f, f], [-f, f]].map(([a, b], k) => [Math.max(0, Math.min(img.width - 1, q[k][0] + a * w)), Math.max(0, Math.min(img.height - 1, q[k][1] + b * h))]);
+};
+const sbExpect = { columns: 3, doors: 2, drawers: 3, open: 0 };
+for (const [name, img] of [["aparador liso con patas", flat()], ["aparador blanco con tiradores negros", flat({ wood: [240, 240, 236], wall: [200, 205, 210], line: [150, 150, 150] })],
+                           ["aparador oscuro en pared blanca", flat({ wood: [90, 60, 40], wall: [245, 245, 245], line: [30, 20, 15] })]]) {
+  check(name, img, { width: 1800, height: 800 }, sbExpect);
+  check(name + " · esquinas propuestas", img, { width: 1800, height: 800 }, sbExpect, guessQuad(img));
+  check(name + " · esquinas holgadas", img, { width: 1800, height: 800 }, sbExpect, pad(img, 0.04));
+}
+check("aparador · esquinas propuestas (suelo detrás)", sb, { width: 1800, height: 800 }, { columns: 3, doors: 2, drawers: 3, open: 0 }, guessQuad(sb));
+const wd = draw(wardrobe, { box: [160, 60, 740, 1040] });
+check("armario · esquinas holgadas", wd, { width: 1800, height: 2200 }, { columns: 3, drawers: 4, doors: (g) => g.doors >= 2 }, pad(wd, 0.04));
+{
+  n++;
+  const det = detectStructure(rectify(wd, pad(wd, 0.04), 480));
+  if (det.side) fails.push("armario · esquinas holgadas: la pared se toma por el costado del mueble");
+}
+
+/* medidas escritas con la foto: cada número con su palabra, en cualquier orden */
+for (const [h, exp] of [
+  ["1,50 x 2", { width: 1500, height: 2000 }], ["2 m de alto", { height: 2000 }], ["fondo 60", { depth: 600 }], ["180", { width: 1800 }],
+  ["ancho 150 cm alto 200 cm", { width: 1500, height: 2000 }], ["alto 2 m ancho 1.5 m", { height: 2000, width: 1500 }],
+  ["fondo 60 alto 180", { depth: 600, height: 1800 }], ["2 metros de alto", { height: 2000 }], ["armario de 3 puertas", {}],
+  ["ancho 1.800 mm", { width: 1800 }], ["120x60x40", { width: 1200, height: 600, depth: 400 }], ["150 wide 200 tall", { width: 1500, height: 2000 }],
+]) {
+  n++;
+  const got = hintDims(h), sort = (o) => JSON.stringify(Object.entries(o).sort());
+  if (sort(got) !== sort(exp)) fails.push(`medidas «${h}»: esperaba ${sort(exp)} · salió ${sort(got)}`);
+}
+for (const [v, e] of [["300", 300], ["1,8", 1800], ["2.400", 2400], ["45 cm", 450]]) {
+  n++;
+  if (mmIn(v) !== e) fails.push(`casilla en mm «${v}»: esperaba ${e} · salió ${mmIn(v)}`);
+}
 
 /* esquinas propuestas: dentro de la foto y rodeando el mueble */
 n++;

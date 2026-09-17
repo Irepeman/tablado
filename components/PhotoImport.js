@@ -7,22 +7,11 @@
    se crea un mueble del motor listo para seguir editando.
    ============================================================ */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { rectify, detectStructure, toParams, guessQuad, homography, quadAspect, summarize } from "@/lib/photo";
+import { rectify, detectStructure, toParams, guessQuad, homography, quadAspect, summarize, mmIn, hintDims } from "@/lib/photo";
 import { MATKEYS, clamp } from "@/lib/model";
 import { tr, matShort } from "@/lib/i18n";
 
 const MAX_SIDE = 1400;
-
-/* «1,80», «180 cm», «1800 mm», «2x2» → mm */
-function lenOf(txt) {
-  const m = String(txt || "").replace(",", ".").match(/(\d+(?:\.\d+)?)\s*(mm|cm|m)?\b/);
-  if (!m) return null;
-  let v = parseFloat(m[1]);
-  const u = m[2] || "";
-  if (u === "m" || (!u && v < 10)) v *= 1000;
-  else if (u === "cm" || (!u && v <= 400)) v *= 10;
-  return Math.round(v);
-}
 
 export default function PhotoImport({ file, hint = "", lang = "es", onCancel, onCreate }) {
   const L = tr(lang);
@@ -48,8 +37,9 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
         const g = c.getContext("2d", { willReadFrequently: true });
         g.drawImage(bmp, 0, 0, w, h);
         const data = g.getImageData(0, 0, w, h);
+        bmp.close?.();
+        if (!alive) return;                       // cerrado mientras cargaba: no se crea la URL (no se liberaría)
         url = URL.createObjectURL(file);
-        if (!alive) return;
         setImg({ url, data, w, h });
         setQuad(guessQuad(data));
       } catch {
@@ -61,20 +51,7 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
 
   /* medidas: la que diga el mensaje, o una estimación por la forma */
   const aspect = quad ? quadAspect(quad) : 1;
-  /* medidas escritas junto a la foto: «1,80 x 2», «2 m de alto», «ancho 150 cm», «fondo 60» */
-  const hintDims = useMemo(() => {
-    const t = String(hint).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/,/g, ".");
-    const out = {};
-    const two = t.match(/(\d+(?:\.\d+)?\s*(?:mm|cm|m)?)\s*(?:x|×|por)\s*(\d+(?:\.\d+)?\s*(?:mm|cm|m)?)/);
-    if (two) { out.width = lenOf(two[1]); out.height = lenOf(two[2]); }
-    const NUM = "(\\d+(?:\\.\\d+)?\\s*(?:mm|cm|m)?)";
-    for (const [k, words] of [["width", "anch\\w*|wide|width"], ["height", "alt\\w*|high|tall|height"], ["depth", "fond\\w*|profund\\w*|deep|depth"]]) {
-      const m = t.match(new RegExp(NUM + "\\s*(?:de\\s+)?(?:" + words + ")")) || t.match(new RegExp("(?:" + words + ")\\s*(?:de\\s+)?" + NUM));
-      if (m) out[k] = lenOf(m[1]);
-    }
-    if (!out.width && !out.height && !two) { const v = lenOf(t); if (v) out.width = v; }
-    return out;
-  }, [hint]);
+  const hd = useMemo(() => hintDims(hint), [hint]);
   /* detección: solo al mover una esquina */
   const det = useMemo(() => {
     if (!img || !quad) return null;
@@ -95,10 +72,10 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
     if (w < 400) { w = 400; h = r10(w * a); }
     return { width: w, height: clamp(h, 400, 2600) };
   })();
-  const width = touched.width ? lenOf(dims.width) : hintDims.width || (hintDims.height ? r10(hintDims.height / a) : guess.width);
-  const height = touched.height ? lenOf(dims.height)
-    : hintDims.height || (touched.width || hintDims.width ? clamp(r10(width * a), 400, 2600) : guess.height);
-  const depth = touched.depth ? lenOf(dims.depth) : hintDims.depth || null;
+  const width = touched.width ? mmIn(dims.width) : hd.width || (hd.height ? r10(hd.height / a) : guess.width);
+  const height = touched.height ? mmIn(dims.height)
+    : hd.height || (touched.width || hd.width ? clamp(r10(width * a), 400, 2600) : guess.height);
+  const depth = touched.depth ? mmIn(dims.depth) : hd.depth || null;
 
   const result = useMemo(() => {
     if (!det || !width || !height) return null;
@@ -182,7 +159,7 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
             <div className="photo-side">
               <div className="photo-sum">
                 {s ? L.photoFound(s) : L.photoNothing}
-                {det && (det.span[0] > 0 || det.span[1] < 1) && <small>{L.photoSide}</small>}
+                {det && det.side && <small>{L.photoSide}</small>}
               </div>
               <div className="photo-fields">
                 {[["width", L.width, width], ["height", L.heightL, height], ["depth", L.depth, depth ?? result?.params.depth]].map(([k, label, v]) => (
@@ -200,7 +177,7 @@ export default function PhotoImport({ file, hint = "", lang = "es", onCancel, on
                   </select>
                 </label>
               </div>
-              {!touched.width && !touched.height && !hintDims.width && !hintDims.height && <p className="photo-est">{L.photoEstimate}</p>}
+              {!touched.width && !touched.height && !hd.width && !hd.height && <p className="photo-est">{L.photoEstimate}</p>}
               <p className="catalog-note">{L.photoTip}</p>
               <div className="photo-actions">
                 <button className="ghost" onClick={onCancel}>{L.cancel}</button>
