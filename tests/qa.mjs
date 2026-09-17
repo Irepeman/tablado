@@ -195,6 +195,14 @@ for (const k of PRESET_KEYS) for (const mat of MATKEYS) invariants(PRESETS[k](no
     applyItem(lib, "tray", 1, 0);
     check(normalize(lib).columns[1].cells[0] === "door+drawer", "catálogo", "una bandeja detrás de una puerta debería ser cajón interior");
   }
+  {
+    /* cajón interior en el módulo de colgar del armario: no quita la barra, va abajo y tras la misma puerta */
+    const ar = PRESETS.armario(normalize({}));
+    applyItem(ar, "door+drawer", 0, 0);
+    const c0 = normalize(ar).columns[0];
+    check(c0.cells[0] === "door+drawer" && c0.cells.includes("rail+door") && c0.joins[0] === true, "catálogo",
+      `el cajón interior en el armario quita la barra o parte la puerta: ${c0.cells.join(",")} ${c0.joins.join(",")}`);
+  }
   const ap = PRESETS.aparador(normalize({}));
   const hinges = build(ap).parts.filter((x) => x.hinge && x.L <= 600).map((x) => `${x.col}${x.hinge}`);
   check(hinges.includes("0L") && hinges.includes("2R"), "tipos de mueble",
