@@ -2,7 +2,7 @@
    Banco de pruebas del chat: frases como las escribe la gente.
    node tests/chat.mjs   → fallos; código 1 si hay alguno
    ============================================================ */
-import { DEFAULT, normalize, build } from "../lib/model.js";
+import { DEFAULT, normalize, build, maxSpan } from "../lib/model.js";
 import { cutlist, nest, quote } from "../lib/pricing.js";
 import { parseIntent, fallback, ALL_SUGGESTIONS } from "../lib/intent.js";
 
@@ -37,6 +37,12 @@ t("vuelve atrás", ({ r }) => r?.action === "undo");
 t("hola", ask(/Hola/));
 t("¿qué puedes hacer?", ask(/medidas/));
 t("gracias", ask(/.+/));
+/* armario de pasillo para toallas: medidas de la frase, sin barra, cajones abajo en todos los módulos */
+t("Tengo un hueco de 1,90 en el pasillo, entre la puerta del baño y la pared. Quiero un armario de 2,20 de alto y poco fondo, unos 40 cm, para toallas, sábanas y los productos de limpieza. Con puertas, en blanco y sin tiradores, que abra al presionar. Abajo dos cajones y arriba baldas.",
+  ({ a }) => a.width === 1890 && a.height === 2200 && a.depth === 400 && a.material === "melamina_blanca" && a.handle === "push" &&
+    allCols(a, (c) => !c.cells.some((x) => x.startsWith("rail")) && c.drawers === 2 && c.door && c.width <= maxSpan(a.material, a.thickness)));
+t("un armario para la ropa", ({ a }) => a.columns.some((c) => c.cells.some((x) => x.startsWith("rail"))) && a.depth >= 580);
+t("armario de 2 metros de ancho y 60 de fondo", ({ a }) => a.width === 2000 && a.depth === 600);
 /* zócalo: cambia su altura, no la del mueble */
 t("quiero que el zócalo sea más corto", ({ a, b }) => a.base === "zocalo" && a.baseHeight < 80 && a.height === b.height, (p) => { p.base = "zocalo"; p.baseHeight = 80; });
 t("que el zócalo sea de 10cm", ({ a, b }) => a.base === "zocalo" && a.baseHeight === 100 && a.height === b.height);
