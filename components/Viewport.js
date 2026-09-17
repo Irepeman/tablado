@@ -34,13 +34,13 @@ const QUAD_VS = "varying vec2 vUv; void main() { vUv = uv; gl_Position = project
 const R_MIN = 0.55, R_MAX = 17, EASE_ROT = 0.19, EASE_ZOOM = 0.17;
 
 const Viewport = forwardRef(function Viewport(
-  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open,
+  { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open, openCols = [], onToggleDoor,
     placing, onPlace, canDropAt, onMoveCell }, ref) {
   const canvasRef = useRef(null);
   const S = useRef(null);              // todo el estado imperativo de three.js
   const propsRef = useRef({});
   propsRef.current = { params, onChange, onCommit, selection, onSelect, exploded, showScale, photo, onPhotoProgress, open,
-    placing, onPlace, canDropAt, onMoveCell };
+    openCols, onToggleDoor, placing, onPlace, canDropAt, onMoveCell };
 
   /* ---------- montaje: escena, luces, entorno, controles ---------- */
   useEffect(() => {
@@ -380,6 +380,19 @@ const Viewport = forwardRef(function Viewport(
       else onSelect(null);
     };
 
+    /* Tocar una puerta la abre (y elige su hueco para editar dentro); tocar la hoja
+       abierta la cierra. Se queda abierta mientras se colocan cosas dentro. */
+    const tapOn = (hit) => {
+      const u = hit ? hit.object.userData : null;
+      const pr = propsRef.current;
+      if (u && u.grp === "frente" && u.hinge && !pr.exploded) {
+        const isOpen = !!pr.open || (pr.openCols || []).includes(u.col);
+        pr.onToggleDoor?.(u.col, !isOpen);
+        if (isOpen) { pr.onSelect(null); return; }
+      }
+      selectFrom(u);
+    };
+
     const onDown = (e) => {
       st.spin = null;
       st.vel = { t: 0, p: 0 };
@@ -521,8 +534,7 @@ const Viewport = forwardRef(function Viewport(
         if (st.moved > 12) {
           if (st.move.to && e.type === "pointerup") propsRef.current.onMoveCell?.(st.move.from, st.move.to);
         } else {
-          const hit = pickAt(e);
-          selectFrom(hit ? hit.object.userData : null);
+          tapOn(pickAt(e));
         }
         st.move = null;
         st.mode = null;
@@ -539,8 +551,7 @@ const Viewport = forwardRef(function Viewport(
         if (st.moved > 4) propsRef.current.onCommit(st.drag.snap);
         st.drag = null;
       } else if (st.mode === "orbit" && st.moved < 5 && e.type === "pointerup") {
-        const hit = pickAt(e);
-        selectFrom(hit ? hit.object.userData : null);
+        tapOn(pickAt(e));
       } else if (st.mode === "orbit" && st.pointers.size === 0 && performance.now() - st.lastMoveT < 70) {
         /* soltar a medio giro: sigue girando y frena (velocidad por fotograma a 60 fps) */
         st.spin = { t: clamp(st.vel.t * 16, -0.09, 0.09), p: clamp(st.vel.p * 16, -0.05, 0.05) };
@@ -874,7 +885,9 @@ const Viewport = forwardRef(function Viewport(
         const side = part.hinge === "L" ? -1 : 1;
         const pivot = new THREE.Group();
         pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz - t / 2) / 1000);
-        pivot.rotation.y = openNow ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
+        /* abierta si se abre todo, o si se ha abierto esa puerta tocándola */
+        const openHere = openNow || (!exploded && openCols.includes(part.col));
+        pivot.rotation.y = openHere ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
         m.position.set((-side * part.L / 2) / 1000, 0, t / 2000);
         pivot.add(m);
         const hnd = handle(part, true);
@@ -946,7 +959,7 @@ const Viewport = forwardRef(function Viewport(
     st.fig.visible = !!showScale && !st.photoOn;
     if (st.ph) st.ph.dirty = true;   // la foto vuelve a empezar si cambia el mueble
     if (st.photoOn) st.stage(true);
-  }, [params, selection, exploded, showScale, open]);
+  }, [params, selection, exploded, showScale, open, openCols.join(",")]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------- modo foto: acumulación ---------- */
   useEffect(() => {

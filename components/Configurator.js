@@ -28,6 +28,8 @@ import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
 import { tr, num, matName, matShort } from "@/lib/i18n";
 
 const LANG_KEY = "cutwise-lang";
+/* piezas que van DENTRO del mueble: al colocarlas, las puertas se abren para ver dónde caen */
+const INSIDE = ["shelf", "rail", "divider", "door+drawer", "tray"];
 const intro = (lang) => {
   const L = tr(lang);
   return [{ role: "ai", text: L.intro }, { role: "sys", text: L.introSys }];
@@ -82,6 +84,12 @@ export default function Configurator() {
   const [showParts, setShowParts] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);   // { file, hint }
   const [placing, setPlacing] = useState(null);      // pieza del catálogo esperando un toque en un hueco
+  const [dragItem, setDragItem] = useState(null);    // pieza del catálogo que se está arrastrando
+  const [openCols, setOpenCols] = useState([]);      // columnas con la puerta abierta (tocándola)
+  const toggleDoor = useCallback((col, on) => {
+    if (!on) setOpenView(false);
+    setOpenCols((xs) => (on ? (xs.includes(col) ? xs : [...xs, col]) : xs.filter((x) => x !== col)));
+  }, []);
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -359,6 +367,10 @@ export default function Configurator() {
     if (!r.ok) { flash(why(r)); return false; }
     onCommitEdit(n);
     flash(L.placed(L.items[item]) + (r.deeper ? ` · ${L.deeper}` : ""));
+    /* dentro de un hueco con puerta: la puerta se queda abierta para ver lo que se ha puesto */
+    const behindDoor = INSIDE.includes(item) && item !== "divider" && tg.cell != null &&
+      isDoor(params.columns[tg.col]?.cells[tg.cell]);
+    if (behindDoor) toggleDoor(tg.col, true);
     setSelection(null);
     vp.current?.flash(item.startsWith("h:") ? tg : { col: tg.col, cell: tg.cell }, item);
     return true;
@@ -418,7 +430,13 @@ export default function Configurator() {
             );
           })}
         </div>
-        {params.columns.length > 1 && <button className="rowbtn" onClick={wholeRow}>{L.wholeRow}</button>}
+        {isDoor(c.cells[j]) && (openView || openCols.includes(selection.col)) && <p className="cellnote">{L.doorOpenHint}</p>}
+        <button className="rowbtn" disabled={!canPlace(params, "shelf", selection.col, j).ok}
+                title={canPlace(params, "shelf", selection.col, j).ok ? L.itemsHelp.shelf : why(canPlace(params, "shelf", selection.col, j))}
+                onClick={() => { const n = deepCopy(params); if (applyItem(n, "shelf", selection.col, j).ok) onCommitEdit(n); }}>
+          {L.addShelfHere}
+        </button>
+        {params.columns.length > 1 && <button className="rowbtn" style={{ marginTop: 4 }} onClick={wholeRow}>{L.wholeRow}</button>}
       </>
     );
   };
@@ -427,6 +445,7 @@ export default function Configurator() {
     history.current.push(deepCopy(params));
     const next = PRESETS[k](params);
     setParams(next);
+    setOpenCols([]);
     setSelection(null);
     convo.current = {};
     pristine.current = false;
@@ -484,7 +503,7 @@ export default function Configurator() {
           <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>{L.scale}</button>
           <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>{L.exploded}</button>
           <button className="tbtn photo-btn" aria-pressed={photo} title={L.photoTitle}
-                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); }}>{L.photo}</button>
+                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); setOpenCols([]); }}>{L.photo}</button>
           <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>{L.founder}</button>
           <button className="tbtn" onClick={undo}>{L.undo}</button>
         </div>
@@ -504,7 +523,9 @@ export default function Configurator() {
           <Viewport
             ref={vp} params={params} selection={selection}
             exploded={exploded} showScale={showScale}
-            photo={photo} onPhotoProgress={setPhotoSamples} open={openView}
+            photo={photo} onPhotoProgress={setPhotoSamples}
+            open={openView || INSIDE.includes(placing) || INSIDE.includes(dragItem)}
+            openCols={openCols} onToggleDoor={toggleDoor}
             onChange={onEdit} onCommit={(snap) => { history.current.push(snap); }}
             onSelect={setSelection}
             placing={placing} canDropAt={canDropAt} onMoveCell={onMoveCell}
@@ -539,8 +560,10 @@ export default function Configurator() {
             <div className="vp-tr">
               <button className="glass pill-btn parts-btn" aria-pressed={showParts} title={L.piecesTitle}
                       onClick={() => { setShowParts((v) => !v); setPlacing(null); }}>＋ {L.piecesBtn}</button>
-              <button className="glass pill-btn" aria-pressed={openView} title={L.openTitle}
-                      onClick={() => setOpenView((v) => !v)}>{L.open}</button>
+              <button className="glass pill-btn" aria-pressed={openView || openCols.length > 0} title={L.openTitle}
+                      onClick={() => { if (openView || openCols.length) { setOpenView(false); setOpenCols([]); } else setOpenView(true); }}>
+                {openView || openCols.length ? L.closeDoors : L.open}
+              </button>
               <button className="glass iconbtn" title={L.viewFront} aria-label={L.viewFront} onClick={() => vp.current?.frame("front")}>▣</button>
               <button className="glass iconbtn" title={L.view34} aria-label={L.view34} onClick={() => vp.current?.frame("34")}>◱</button>
               <button className="glass iconbtn" title={L.viewTop} aria-label={L.viewTop} onClick={() => vp.current?.frame("top")}>⬒</button>
@@ -556,8 +579,8 @@ export default function Configurator() {
               <Catalog lang={lang} placing={placing}
                        onClose={() => { setShowParts(false); setPlacing(null); }}
                        onTap={(k) => { setSelection(null); setPlacing((cur) => (cur === k ? null : k)); if (window.innerWidth <= 900) setShowParts(false); }}
-                       onDragMove={(k, x, y) => !!vp.current?.dropAt(x, y, k)?.ok}
-                       onDrop={(k, x, y) => { const tg = vp.current?.dropAt(x, y, k); vp.current?.clearDrop(); setPlacing(null); if (tg) placeItem(k, tg); }} />
+                       onDragMove={(k, x, y) => { setDragItem(k); return !!vp.current?.dropAt(x, y, k)?.ok; }}
+                       onDrop={(k, x, y) => { const tg = vp.current?.dropAt(x, y, k); vp.current?.clearDrop(); setPlacing(null); setDragItem(null); if (tg) placeItem(k, tg); }} />
             )}
             {placing && (
               <div className="glass placing-bar" role="status">
@@ -581,7 +604,7 @@ export default function Configurator() {
             onPushHistory={(snap) => { history.current.push(snap); }}
             onOrder={(q, rows, nested) => setModal({ q, rows, nested })}
             onCsv={downloadCsv} onPreset={applyPreset}
-            onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); vp.current?.frame("34"); }}
+            onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); setOpenCols([]); vp.current?.frame("34"); }}
           />
         </div>
 
@@ -599,6 +622,7 @@ export default function Configurator() {
             history.current.push(deepCopy(params));
             setParams(next);
             setSelection(null);
+            setOpenCols([]);
             setPhoto(false);
             convo.current = {};
             const url = URL.createObjectURL(photoFile.file);
