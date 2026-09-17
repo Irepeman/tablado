@@ -9,7 +9,7 @@
    Nada de esto entra en el despiece ni en el precio.
    ============================================================ */
 import * as THREE from "three";
-import { cellBounds, isRail, isDoor, BACK_T, railPos } from "@/lib/model";
+import { cellBounds, isRail, isDoor, hasBox, BACK_T, railPos } from "@/lib/model";
 
 const MM = 0.001;
 const mats = new Map();
@@ -73,14 +73,15 @@ function bookRow(width, maxH, depth, r) {
 }
 
 /* pila de libros tumbados; origen: abajo en el centro */
-function bookStack(maxH, r) {
+function bookStack(maxH, r, maxW = 250) {
   const g = new THREE.Group();
   let y = 0;
   const n = 3 + Math.floor(r() * 4);
   for (let k = 0; k < n; k++) {
     const t = 22 + r() * 18;
     if (y + t > maxH) break;
-    const b = block(200 + r() * 50, t, 150 + r() * 40, BOOKS[Math.floor(r() * BOOKS.length)], 0.75);
+    /* en un hueco estrecho, libros de bolsillo: la pila no atraviesa los costados */
+    const b = block(Math.min(200 + r() * 50, maxW), t, 150 + r() * 40, BOOKS[Math.floor(r() * BOOKS.length)], 0.75);
     b.position.set((r() - 0.5) * 12 * MM, (y + t / 2) * MM, (r() - 0.5) * 10 * MM);
     b.rotation.y = (r() - 0.5) * 0.12;
     g.add(b);
@@ -90,7 +91,7 @@ function bookStack(maxH, r) {
 }
 
 /* jarrón de cerámica, a veces con ramas secas */
-function vase(h, r) {
+function vase(h, r, room = Infinity) {
   const g = new THREE.Group();
   const rad = h * (0.22 + r() * 0.1);
   const pts = [
@@ -99,9 +100,10 @@ function vase(h, r) {
   const body = new THREE.Mesh(new THREE.LatheGeometry(pts, 36), mat([0xefebe3, 0xc9a27e, 0x7b8a7a, 0x2c2c2a][Math.floor(r() * 4)], 0.45));
   body.castShadow = true;
   g.add(body);
-  if (r() < 0.7) {
+  if (r() < 0.7 && room - h > 60) {
     for (let k = 0; k < 3; k++) {
-      const len = h * (0.9 + r() * 0.8);
+      /* las ramas no atraviesan la balda de encima */
+      const len = Math.min(h * (0.9 + r() * 0.8), room - h + 5);
       const s = new THREE.Mesh(new THREE.CylinderGeometry(1.2 * MM, 2 * MM, len * MM, 6), mat(0x5b4633, 0.9));
       s.position.set(0, (h + len / 2 - 10) * MM, 0);
       s.rotation.z = (r() - 0.5) * 0.7;
@@ -233,13 +235,16 @@ export function buildDecor(group, p, geo) {
         return;
       }
       /* detrás de las puertas de un armario: ropa doblada, se ve con «Abrir» */
-      if (isDoor(type) && D >= 500 && h >= 150 && w >= 300) {
+      /* con cajón interior, la ropa va encima del cajón */
+      const above = hasBox(type) ? Math.min(180, h - 30) + 30 : 0;
+      if (isDoor(type) && D >= 500 && h - above >= 150 && w >= 300) {
         const stacks = w >= 650 ? 2 : 1;
         for (let k = 0; k < stacks; k++) {
-          let yy = 0;
+          let yy = above;
           const pile = new THREE.Group();
-          while (yy < Math.min(h - 40, 320)) {
+          for (;;) {
             const th = 24 + r() * 22;
+            if (yy + th > Math.min(h - 40, above + 320)) break;
             const f = block(270 + r() * 30, th, 250 + r() * 30, CLOTHES[Math.floor(r() * CLOTHES.length)], 0.95);
             f.position.set((r() - 0.5) * 10 * MM, (yy + th / 2) * MM, (r() - 0.5) * 10 * MM);
             pile.add(f);
@@ -254,7 +259,7 @@ export function buildDecor(group, p, geo) {
       const pick = r();
       if (pick < (tall ? 0.5 : 0.35)) {
         if (h < 210) {
-          const s = bookStack(h - 15, r);
+          const s = bookStack(h - 15, r, w - 20);
           s.position.set((xx + w / 2) * MM, y * MM, zOf(180));
           group.add(s);
         } else {
@@ -265,7 +270,7 @@ export function buildDecor(group, p, geo) {
           group.add(row);
           const rest = w - row.userData.width - 30;
           if (rest > 150 && h > 220 && r() < 0.55) {
-            const v = vase(Math.min(h - 40, 150 + r() * 80), r);
+            const v = vase(Math.min(h - 40, 150 + r() * 80), r, h - 15);
             v.position.set((fromLeft ? xx + w - rest / 2 : xx + rest / 2) * MM, y * MM, zOf(120));
             group.add(v);
           }
@@ -276,7 +281,7 @@ export function buildDecor(group, p, geo) {
         b.position.set((xx + w / 2) * MM, y * MM, zOf(bd));
         group.add(b);
       } else if (pick < 0.8 && h >= 220) {
-        const o = r() < 0.5 ? vase(Math.min(h - 50, 160 + r() * 90), r) : plant(Math.min(h - 30, 280 + r() * 90), r);
+        const o = r() < 0.5 ? vase(Math.min(h - 50, 160 + r() * 90), r, h - 15) : plant(Math.min(h - 30, 280 + r() * 90), r);
         o.position.set((xx + w * (0.3 + r() * 0.4)) * MM, y * MM, zOf(140));
         group.add(o);
       }
@@ -298,7 +303,7 @@ export function buildDecor(group, p, geo) {
         const frame = new THREE.Group();
         frame.add(block(420, 540, 22, 0x2a2622, 0.6));
         const art = block(360, 470, 2, [0xd8cdb8, 0x9aa8a0, 0xc9a58a][Math.floor(r() * 3)], 0.9);
-        art.position.set(0, 35 * MM, 12 * MM);
+        art.position.set(0, (35 + 235) * MM, 12 * MM);      // centrado en el marco (block apoya en su base)
         frame.add(art);
         frame.rotation.x = -0.12;
         onTop(frame, p.width / 2 - 320, -D / 2 + 60);

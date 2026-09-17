@@ -78,7 +78,7 @@ function invariants(p, tag) {
     const b = boxOf(x);
     const inside = b.min[0] >= -W / 2 - 0.5 && b.max[0] <= W / 2 + 0.5 &&
                    b.min[1] >= -0.5 && b.max[1] <= H + 0.5 &&
-                   b.min[2] >= -D / 2 - 0.5 && b.max[2] <= D / 2 + t + 2.5;
+                   b.min[2] >= -D / 2 - 0.5 && b.max[2] <= D / 2 + 0.5;   // frentes embutidos: nada sobresale por delante
     check(inside, "piezas fuera del mueble", `${tag}: ${x.label} (${x.id}) se sale del volumen`);
   }
   const bx = vis.map(boxOf);
@@ -91,11 +91,12 @@ function invariants(p, tag) {
       `${tag}: ${x.label} ${Math.round(x.L)}×${Math.round(x.Wd)}`);
   }
   for (const x of vis.filter((v) => v.grp === "frente" && v.id.startsWith("puerta"))) {
-    check(x.L <= 600 + 0.5, "puertas demasiado anchas", `${tag}: ${x.label} de ${Math.round(x.L)} mm de ancho`);
+    /* hojas de 600 mm; en columnas de más de 1,2 m, dos hojas de hasta 750 (como las de un armario de catálogo) */
+    check(x.L <= 750 + 0.5, "puertas demasiado anchas", `${tag}: ${x.label} de ${Math.round(x.L)} mm de ancho`);
   }
 
   const rows = cutlist(geo), nested = nest(rows);
-  const eligible = rows.filter((r) => r.t > 6).reduce((a, r) => a + r.qty, 0);
+  const eligible = rows.filter((r) => r.t > 6 && !r.hw).reduce((a, r) => a + r.qty, 0);   // la barra es herraje
   const placed = nested.sheets.reduce((a, sh) => a + sh.bands.reduce((b, bd) => b + bd.items.length, 0), 0);
   check(placed === eligible, "plan de corte incompleto", `${tag}: ${eligible} piezas, ${placed} colocadas`);
   for (const sh of nested.sheets) {

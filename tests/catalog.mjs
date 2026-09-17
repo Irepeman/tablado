@@ -9,7 +9,7 @@
    ============================================================ */
 import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
-  drawersIn, drawerCount, isDoor, isRail, hasBox, HANDLES, build,
+  drawersIn, drawerCount, isDoor, isRail, hasBox, HANDLES, build, railPos, railRange, setRailAt, doorKey,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -81,6 +81,64 @@ for (let run = 0; run < 400; run++) {
     log.push(what);
     p = norm;
   }
+}
+
+/* ---- casos concretos ---- */
+{
+  /* doble barra: subir una no mueve la otra */
+  n++;
+  let p = normalize({ width: 900, height: 2400, depth: 600, base: "zocalo", baseHeight: 80, columns: [{ width: 800, shelves: [1100], cells: ["rail", "rail"] }] });
+  const up0 = railPos(p, p.columns[0], 1);
+  setRailAt(p, p.columns[0], 0, 700);
+  p = normalize(p);
+  if (railPos(p, p.columns[0], 0) !== railRange(p, p.columns[0], 0)[0] && railPos(p, p.columns[0], 0) !== 700 || railPos(p, p.columns[0], 1) !== up0)
+    fail("doble barra", `bajar la de abajo mueve la de arriba: ${railPos(p, p.columns[0], 0)} / ${railPos(p, p.columns[0], 1)} (antes ${up0})`);
+  setRailAt(p, p.columns[0], 1, up0 - 150);
+  p = normalize(p);
+  if (railPos(p, p.columns[0], 0) !== 700 || railPos(p, p.columns[0], 1) !== up0 - 150)
+    fail("doble barra", `cada barra no guarda su altura: ${railPos(p, p.columns[0], 0)} / ${railPos(p, p.columns[0], 1)}`);
+  /* quitar la barra y volver a ponerla: vuelve a su sitio de siempre */
+  n++;
+  let q = PRESETS.armario(normalize({}));
+  setRailAt(q, q.columns[0], 0, 1000);
+  q = normalize(q);
+  q.columns[0].cells[0] = "door";
+  q = normalize(q);
+  if (q.columns[0].railAt) fail("barra", `la altura de una barra quitada se queda guardada: ${JSON.stringify(q.columns[0].railAt)}`);
+  applyItem(q, "rail", 0, 0);
+  q = normalize(q);
+  if (railPos(q, q.columns[0], 0) !== railRange(q, q.columns[0], 0)[1]) fail("barra", `una barra nueva no va bajo el techo del hueco: ${railPos(q, q.columns[0], 0)}`);
+  /* valores raros en railAt */
+  n++;
+  for (const v of ["", " ", false, true, null, [], "900", NaN]) {
+    const r = normalize({ ...PRESETS.armario(normalize({})), columns: PRESETS.armario(normalize({})).columns.map((c) => ({ ...c, railAt: v })) });
+    if (r.columns.some((c) => c.railAt !== undefined)) fail("barra", `railAt=${JSON.stringify(v)} se toma por una altura`);
+  }
+}
+{
+  /* cajón interior o bandeja junto a una balda vecina baja: su compartimento tiene sitio para la caja */
+  n++;
+  const p = normalize({ width: 1200, height: 2000, depth: 600, columns: [{ width: 580, shelves: [], cells: ["door"] }, { width: 580, shelves: [150], cells: ["open", "open"] }] });
+  const r = applyItem(p, "tray", 0, 0);
+  const again = normalize(deepCopy(p));
+  if (!r.ok || !again.columns[0].cells.some(hasBox)) fail("cajón interior", `la bandeja desaparece: ${JSON.stringify(again.columns[0])}`);
+  /* en un hueco de barra de 83 cm libres, la barra no se pierde */
+  n++;
+  const w = normalize({ width: 900, height: 950, depth: 600, base: "zocalo", baseHeight: 80, columns: [{ width: 864, shelves: [], cells: ["rail+door"] }] });
+  applyItem(w, "door+drawer", 0, 0);
+  const w2 = normalize(deepCopy(w));
+  if (!w2.columns[0].cells.some(hasBox) || !w2.columns[0].cells.some(isRail)) fail("cajón interior", `el cajón interior quita la barra o no se pone: ${JSON.stringify(w2.columns[0].cells)}`);
+}
+{
+  /* una columna ancha con puerta: dos hojas, nunca una tercera sin costado donde colgarse */
+  n++;
+  const p = normalize({ width: 1500, columns: [{ width: 1464, shelves: [], cells: ["door"] }] });
+  const leaves = build(p).parts.filter((x) => x.hinge);
+  if (leaves.length !== 2 || leaves[0].hinge !== "L" || leaves[1].hinge !== "R") fail("puertas", `hojas: ${leaves.map((x) => x.hinge).join(",")}`);
+  /* cada hoja tiene su clave y no se repite */
+  n++;
+  const ar = build(PRESETS.armario(normalize({}))).parts.filter((x) => x.hinge).map(doorKey);
+  if (new Set(ar).size !== ar.length) fail("puertas", `claves de hoja repetidas: ${ar.join(" ")}`);
 }
 
 const total = [...fails.values()].reduce((a, v) => a + v.length, 0);

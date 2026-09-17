@@ -275,7 +275,7 @@ export default function SpecRail({
               [L.st.weight, `${Math.round(q.weight)}`, L.units.kg],
               [L.st.edge, q.edgeML.toFixed(1), L.units.m],
               [L.st.span, n(span), L.units.mm],
-              [L.st.hw, `${q.hw.minifix + q.hw.pins + q.hw.hinges + q.hw.runners * 2}`, L.units.ud],
+              [L.st.hw, `${q.hw.minifix + q.hw.pins + q.hw.hinges + q.hw.runners * 2 + q.hw.rails * 3}`, L.units.ud],
               [L.st.lead, "12–16", L.units.days],
             ].map(([k, v, u]) => (
               <div className="stat" key={k}>
