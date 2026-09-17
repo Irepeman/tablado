@@ -8,10 +8,12 @@ import { rectify, detectStructure, toParams, homography, guessQuad, summarize } 
 import { normalize, deepCopy } from "../lib/model.js";
 
 let seed = 77;
+const clamp0 = (v, hi) => Math.max(0, Math.min(hi, v));
 const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
 
 /* layout: columnas con ancho relativo y huecos de abajo arriba [tipo, alto relativo] */
-function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [190, 150, 105], base = 0.04, side = 0, cornice = 0, sideTone = 0.78 } = {}) {
+function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [190, 150, 105], base = 0.04, side = 0, cornice = 0, sideTone = 0.78,
+                        sideL = 0, handles = true, joint = 2, grain = 0, studio = false } = {}) {
   const data = new Uint8ClampedArray(W * H * 4);
   const set = (x, y, c) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
@@ -24,14 +26,20 @@ function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [1
       set(x, y, [c[0] + n, c[1] + n, c[2] + n]);
     }
   };
-  rect(0, 0, W, H, [228, 224, 214], 8);                      // pared
-  rect(0, H * 0.88, W, H, [196, 170, 130], 10);              // suelo
+  if (studio) rect(0, 0, W, H, [246, 246, 244], 3);          // foto de catálogo: fondo blanco
+  else {
+    rect(0, 0, W, H, [228, 224, 214], 8);                    // pared
+    rect(0, H * 0.88, W, H, [196, 170, 130], 10);            // suelo
+  }
   const [bx0, by0, bx1, by1] = box;
   const bw = bx1 - bx0, bh = by1 - by0, t = Math.max(3, bw * 0.012);
   const carBot = by1 - bh * base;
   rect(bx0, by0, bx1, carBot, wood, 5);                      // carcasa
   if (side) {                                                 // costado visible, a la derecha
     rect(bx1, by0, bx1 + side, by1, wood.map((v) => v * sideTone), 5);
+  }
+  if (sideL) {                                                // costado visible, a la izquierda
+    rect(bx0 - sideL, by0, bx0, by1, wood.map((v) => v * sideTone), 5);
   }
   if (cornice) {                                              // cornisa: moldura algo más oscura con su sombra
     rect(bx0 - 6, by0, bx1 + 6 + side, by0 + cornice, wood.map((v) => v * 0.9), 5);
@@ -60,10 +68,11 @@ function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [1
           bx += tw + 1;
         }
       } else {
-        dark(x, y0, x + cw, y0 + 2); dark(x, y - 2, x + cw, y);   // juntas
-        dark(x, y0, x + 2, y); dark(x + cw - 2, y0, x + cw, y);
-        if (type === "drawer") dark(x + cw * 0.4, y0 + 12, x + cw * 0.6, y0 + 16);
-        else dark(x + cw - 16, y0 + ch * 0.45, x + cw - 12, y0 + ch * 0.55);
+        const jw = joint;
+        dark(x, y0, x + cw, y0 + jw); dark(x, y - jw, x + cw, y);   // juntas
+        dark(x, y0, x + jw, y); dark(x + cw - jw, y0, x + cw, y);
+        if (handles && type === "drawer") dark(x + cw * 0.4, y0 + 12, x + cw * 0.6, y0 + 16);
+        else if (handles) dark(x + cw - 16, y0 + ch * 0.45, x + cw - 12, y0 + ch * 0.55);
       }
       y = y0;
       if (k < col.cells.length - 1) { dark(x, y - t, x + cw, y - t + 1.5); y -= t; }
@@ -71,6 +80,15 @@ function draw(layout, { W = 900, H = 1100, box = [150, 120, 750, 980], wood = [1
     x += cw;
     if (ci < layout.length - 1) { dark(x, innerTop, x + 1.5, innerBot); dark(x + t - 1.5, innerTop, x + t, innerBot); x += t; }
   });
+  if (grain) {
+    /* veta: rayas verticales suaves en toda la madera, como el roble de una foto de catálogo */
+    let g = 0;
+    const streak = Array.from({ length: W }, () => (g = g * 0.85 + (rnd() - 0.5) * grain));
+    for (let y = by0; y < by1; y++) for (let x = bx0 - sideL; x < bx1 + side; x++) {
+      const k = (y * W + x) * 4, xs = clamp0(Math.round(x + 9 * Math.sin(y / 70 + x * 0.05)), W - 1);   // la veta serpentea
+      for (let c = 0; c < 3; c++) data[k + c] = data[k + c] * (1 + streak[xs]);
+    }
+  }
   return { width: W, height: H, data, quad: [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]] };
 }
 
@@ -143,6 +161,20 @@ classic2.quad = [[220, 90], [810, 90], [810, 1030], [220, 1030]];
 const classic2w = warp(classic2, [[30, 60], [1000, 0], [1000, 1100], [0, 1040]]);
 check("armario clásico en perspectiva", classic2w, { width: 1500, height: 2000 },
       { columns: 3, open: 0, drawers: 6, doors: (g) => g.doors >= 3 });
+/* armario de catálogo (foto real que falló): 3 módulos iguales, sin tiradores, veta
+   marcada, fondo blanco, zócalo y el costado IZQUIERDO a la vista. Izquierda y derecha:
+   puerta alta y puerta baja; centro: puerta alta y 3 cajones hasta el zócalo. */
+const tall = 0.63;
+const catalog = draw([
+  { w: 1, cells: [D(1 - tall), D(tall)] },
+  { w: 1, cells: [R((1 - tall) / 3), R((1 - tall) / 3), R((1 - tall) / 3), D(tall)] },
+  { w: 1, cells: [D(1 - tall), D(tall)] },
+], { W: 900, H: 1100, box: [150, 60, 800, 1020], sideL: 40, handles: false, joint: 1.5, grain: 0.03, studio: true,
+     wood: [196, 156, 108], base: 0.05, sideTone: 0.85 });
+catalog.quad = [[110, 60], [800, 60], [800, 1020], [110, 1020]];      // las esquinas cogen también el costado
+check("armario de catálogo con costado izquierdo", catalog, { width: 1590, height: 2000 },
+      { columns: 3, open: 0, drawers: 3, doors: (g) => g.doors >= 5,
+        widths: (g, p) => Math.max(...p.columns.map((c) => c.width)) / Math.min(...p.columns.map((c) => c.width)) < 1.12 });
 const mixed = [{ w: 1, cells: [D(), O(), O()] }, { w: 1.4, cells: [R(0.5), R(0.5), O(2), O(1)] }, { w: 1, cells: [D(), O(), O()] }];
 check("librería mixta", draw(mixed, { box: [110, 80, 790, 1020] }), { width: 2000, height: 2000 },
       { columns: 3, drawers: 2, doors: 2, open: (g) => g.open >= 5 });
