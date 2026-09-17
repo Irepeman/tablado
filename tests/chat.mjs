@@ -51,6 +51,8 @@ t("Es para el dormitorio de mi hija, que tiene 12 años. La pared mide 2,40 y el
     a.columns.reduce((q, c) => q + c.cells.filter((x) => x === "door+drawer").length, 0) === 2 &&
     allCols(a, (c) => c.width <= 1000));
 t("que quepa en un hueco de 2,10", ({ a }) => a.width === 2090);
+/* el color de la gola no cambia el acabado del mueble */
+t("que la gola sea negra", ({ a, b, r }) => a.material === b.material && ((r && r.ask && /aluminio/.test(r.ask)) || (r && r.notes && r.notes.some((x) => /aluminio/.test(x)))));
 /* zócalo: cambia su altura, no la del mueble */
 t("quiero que el zócalo sea más corto", ({ a, b }) => a.base === "zocalo" && a.baseHeight < 80 && a.height === b.height, (p) => { p.base = "zocalo"; p.baseHeight = 80; });
 t("que el zócalo sea de 10cm", ({ a, b }) => a.base === "zocalo" && a.baseHeight === 100 && a.height === b.height);
