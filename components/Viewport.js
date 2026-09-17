@@ -909,21 +909,21 @@ const Viewport = forwardRef(function Viewport(
       m.userData = part;
       st.meshes.push(m);
       if (part.grp === "frente" && part.hinge) {
-        /* puerta: gira sobre el canto de las bisagras, por detrás de la hoja */
+        /* puerta embutida: gira sobre la arista delantera del lado de las bisagras, así sale hacia fuera sin chocar con el costado */
         const side = part.hinge === "L" ? -1 : 1;
         const pivot = new THREE.Group();
-        pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz - t / 2) / 1000);
+        pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz + t / 2) / 1000);
         /* abierta si se abre todo, o si se ha abierto esa puerta tocándola */
         const openHere = openNow || (!exploded && openCols.includes(part.col));
         pivot.rotation.y = openHere ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
-        m.position.set((-side * part.L / 2) / 1000, 0, t / 2000);
+        m.position.set((-side * part.L / 2) / 1000, 0, -t / 2000);
         pivot.add(m);
         const hnd = handle(part, true);
         if (hnd) {
           const len = hnd.userData.len;
           const bottom = part.pos[1] - part.Wd / 2, top = part.pos[1] + part.Wd / 2;
           const yh = hnd.userData.edge ? py : clamp(1000, bottom + len / 2 + 60, top - len / 2 - 60);
-          hnd.position.set((-side * (part.L - (hnd.userData.edge ? 9 : 40))) / 1000, (yh - py) / 1000, t / 1000);
+          hnd.position.set((-side * (part.L - (hnd.userData.edge ? 9 : 40))) / 1000, (yh - py) / 1000, 0);
           pivot.add(hnd);
         }
         st.root.add(pivot);
