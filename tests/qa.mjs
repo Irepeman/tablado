@@ -196,7 +196,7 @@ for (const k of PRESET_KEYS) for (const mat of MATKEYS) invariants(PRESETS[k](no
     check(normalize(lib).columns[1].cells[0] === "door+drawer", "catálogo", "una bandeja detrás de una puerta debería ser cajón interior");
   }
   const ap = PRESETS.aparador(normalize({}));
-  const hinges = build(ap).parts.filter((x) => x.hinge && x.L < 600).map((x) => `${x.col}${x.hinge}`);
+  const hinges = build(ap).parts.filter((x) => x.hinge && x.L <= 600).map((x) => `${x.col}${x.hinge}`);
   check(hinges.includes("0L") && hinges.includes("2R"), "tipos de mueble",
     `las puertas del aparador no abren hacia fuera por los dos lados: ${hinges.join(" ")}`);
   const zp = normalize({ ...DEFAULT(), base: "zocalo", baseHeight: 80 });

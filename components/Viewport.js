@@ -323,7 +323,9 @@ const Viewport = forwardRef(function Viewport(
         let xx = geo.x0;
         for (let i = 0; i < p.columns.length; i++) {
           const c = p.columns[i];
-          if (xm >= xx - t / 2 && xm <= xx + c.width + t / 2) {
+          /* los frentes tapan también el canto de los costados: la primera y la última columna llegan hasta fuera */
+          const ex0 = i === 0 ? t : t / 2, ex1 = i === p.columns.length - 1 ? t : t / 2;
+          if (xm >= xx - ex0 && xm <= xx + c.width + ex1) {
             if (ym < -t || ym > geo.Hi + t) return { col: i, cell: null };
             return { col: i, cell: cellAtHeight(p, c, clamp(ym, 0, geo.Hi - 1)) };
           }
