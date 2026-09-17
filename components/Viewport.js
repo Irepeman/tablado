@@ -426,7 +426,11 @@ const Viewport = forwardRef(function Viewport(
         (propsRef.current.params.columns[sel.col]?.cells[sel.cell] || "open") !== "open";
       if (own) {
         st.mode = "move";
-        st.move = { from: { col: sel.col, cell: sel.cell }, to: null };
+        /* mover lo que hay en un hueco tiene que ser a propósito: con el dedo, mantener pulsado
+           un momento; con ratón o trackpad, arrastrar un buen trecho. Antes bastaban 12 px y un
+           toque algo movido llevaba los cajones al hueco de al lado sin querer. */
+        st.move = { from: { col: sel.col, cell: sel.cell }, to: null, t0: performance.now(),
+                    touch: e.pointerType !== "mouse", armed: false };
         return;
       }
       if (propsRef.current.placing) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza
@@ -473,7 +477,16 @@ const Viewport = forwardRef(function Viewport(
       if (st.mode === "move" && st.move) {
         st.moved += Math.abs(e.clientX - st.last.x) + Math.abs(e.clientY - st.last.y);
         st.last = { x: e.clientX, y: e.clientY };
-        if (st.moved > 12) {
+        if (!st.move.armed) {
+          const held = performance.now() - st.move.t0;
+          if (st.move.touch && st.moved > 10 && held < 350) {
+            /* el dedo se ha movido sin mantener pulsado: es un giro, no un traslado */
+            st.move = null; st.mode = "orbit";
+            return;
+          }
+          if (st.move.touch ? held >= 350 : st.moved > 40) st.move.armed = true;
+        }
+        if (st.move.armed) {
           const tg = targetAt(e.clientX, e.clientY);
           const src = propsRef.current.params.columns[st.move.from.col].cells[st.move.from.cell];
           const same = tg && tg.col === st.move.from.col && tg.cell === st.move.from.cell;
@@ -558,9 +571,9 @@ const Viewport = forwardRef(function Viewport(
       if (st.mode === "move" && st.move) {
         showDrop(null);
         canvas.style.cursor = propsRef.current.placing ? "copy" : "";
-        if (st.moved > 12) {
+        if (st.move.armed) {
           if (st.move.to && e.type === "pointerup") propsRef.current.onMoveCell?.(st.move.from, st.move.to);
-        } else {
+        } else if (st.moved <= 12) {
           tapOn(pickAt(e));
         }
         st.move = null;
