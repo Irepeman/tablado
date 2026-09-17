@@ -2,7 +2,7 @@
    Banco de pruebas del chat: frases como las escribe la gente.
    node tests/chat.mjs   → fallos; código 1 si hay alguno
    ============================================================ */
-import { DEFAULT, normalize, build, maxSpan } from "../lib/model.js";
+import { DEFAULT, normalize, build, maxSpan, PRESETS, cellClear } from "../lib/model.js";
 import { cutlist, nest, quote } from "../lib/pricing.js";
 import { parseIntent, fallback, ALL_SUGGESTIONS } from "../lib/intent.js";
 
@@ -138,6 +138,68 @@ t("añade tres baldas a la segunda", ({ a, b }) => col(a, 1).shelves.length === 
 t("añade dos columnas", ({ a, b }) => a.columns.length === b.columns.length + 2);
 t("pon dos baldas", ({ a }) => allCols(a, (c) => c.shelves.length === 2));
 
+/* ---- lo que encontró la batería de frases de clientes ---- */
+const rails = (a) => a.columns.filter((c) => c.cells.some((x) => x.startsWith("rail")));
+const railRoom = (a) => rails(a).every((c) => c.cells.some((x, j) => x.startsWith("rail") && cellClear(a, c, j) >= 900));
+const drawersLow = (a) => a.columns.every((c) => !c.cells.slice(1).some((x) => /^drawer/.test(x)) || c.cells.findIndex((x) => x.startsWith("rail")) > 0);
+/* el chip de la respuesta de la gola: solo el tirador, sin barra de colgar ni mueble negro */
+t("Tiradores de barra negros", ({ a, b }) => a.handle === "bar" && a.material === b.material && a.depth === b.depth && !rails(a).length,
+  (p) => Object.assign(p, PRESETS.aparador(p), { handle: "knob" }));
+t("tiradores de barra", ({ a, b }) => a.handle === "bar" && a.depth === b.depth && !rails(a).length, (p) => { p.handle = "knob"; });
+t("la barra de colgar negra", ({ a }) => a.material === "roble" && rails(a).length === 1);
+/* «tirador» en singular */
+t("que el tirador sea negro", ({ a }) => a.material === "melamina_blanca" && a.handle === "bar", (p) => { p.material = "melamina_blanca"; p.handle = "knob"; });
+t("sin tirador", ({ a }) => a.handle === "push");
+t("tiradores de color negro", ({ a }) => a.material === "roble" && a.handle === "bar", (p) => { p.handle = "knob"; });
+/* el alto del mueble no se pierde al hablar de patas o zócalo */
+t("de 1,80 de alto con patas de 15 cm", ({ a }) => a.height === 1800 && a.base === "patas" && a.baseHeight === 150, (p) => { p.height = 2400; });
+t("2 m de alto con zócalo de 10", ({ a }) => a.height === 2000 && a.base === "zocalo" && a.baseHeight === 100, (p) => { p.height = 2400; });
+/* zócalo y patas: negaciones y centímetros sin unidad */
+t("sin zócalo", ({ a }) => a.base === "patas", (p) => { p.base = "zocalo"; p.baseHeight = 80; });
+t("quita el zócalo", ({ a }) => a.base !== "zocalo", (p) => { p.base = "zocalo"; p.baseHeight = 80; });
+t("sin patas, con zócalo", ({ a }) => a.base === "zocalo");
+t("patas de 8", ({ a }) => a.base === "patas" && a.baseHeight === 80);
+t("armario con zócalo de 8", ({ a }) => a.base === "zocalo" && a.baseHeight === 80);
+/* armario: cajones y baldas fuera de la zona de colgar; el plan por zonas no se come los cajones */
+t("Quiero un armario con una parte para colgar y otra con baldas y 3 cajones abajo",
+  ({ a }) => rails(a).length && a.columns.some((c) => c.cells[0] === "drawer3" && !c.cells.some((x) => x.startsWith("rail"))) && railRoom(a));
+t("armario con baldas y dos cajones abajo", ({ a }) => railRoom(a) && drawersLow(a) && a.columns.some((c) => c.drawers === 2));
+t("armario con barra y 3 cajones", ({ a, r }) => railRoom(a) && a.columns.some((c) => c.drawers === 3) && !/todas las columnas/.test(r.changes.join()));
+/* armario con otro alto: el maletero sigue siendo un maletero */
+t("armario de 2 m de alto", ({ a }) => a.height === 2000 && rails(a).every((c) => cellClear(a, c, c.cells.length - 1) >= 250));
+t("armario de 1,80 m de alto y 1 m de ancho", ({ a }) => a.height === 1800 && rails(a).every((c) => cellClear(a, c, c.cells.length - 1) >= 250));
+/* medidas sin decir «ancho» */
+t("estantería de 2 metros", ({ a }) => a.width === 2000, (p) => { p.width = 1200; });
+t("quiero una librería de 1,5 m", ({ a }) => a.width === 1500);
+t("mueble de tv de 1,80", ({ a }) => a.width === 1800 && a.height === 560);
+t("un armario de 2,40", ({ a }) => a.width === 2400 && a.columns.every((c) => c.width <= 1000));
+t("armario para zapatos de 1 metro", ({ a }) => a.width === 1000);
+t("hueco de 90cm", ({ a }) => a.width === 890);
+t("mi hueco mide 1,50", ({ a }) => a.width === 1490);
+t("el hueco mide 1,50 de ancho", ({ a, r }) => a.width === 1490 && r.changes.length === 1);
+/* la puerta y la ventana de la habitación no son del mueble */
+t("tengo un hueco de 2 metros entre la ventana y la puerta", ({ a, b }) => a.width === 1990 && a.height === b.height && allCols(a, (c) => !c.door));
+t("tengo un hueco de 1,90 entre la puerta y la pared para libros", ({ a }) => a.width === 1890 && allCols(a, (c) => !c.door));
+t("que quepa debajo de la ventana, 90 cm", ({ a, b }) => a.height === 890 && a.width === b.width);
+/* el color de las puertas no es el del mueble si se nombra otro acabado */
+t("puertas blancas y estructura de roble", ({ a, r }) => a.material === "roble" && allCols(a, (c) => c.door) && r.notes.some((x) => /mismo acabado/.test(x)), (p) => { p.material = "nogal"; });
+/* respuestas que no se contradicen */
+t("Quiero un armario de 1,20 de ancho, 2 m de alto y 55 de fondo, con barra y un cajón abajo",
+  ({ a, r }) => a.width === 1200 && a.height === 2000 && a.depth === 550 && !r.notes.some((x) => /600 mm/.test(x)) && r.notes.some((x) => /rozan/.test(x)));
+t("tengo 800 € de presupuesto para un armario", ({ a, r }) => a.depth >= 580 && !r.notes.some((x) => /cajones abajo/.test(x)) === !a.columns.some((c) => c.drawers));
+/* presupuesto dicho de otras formas, sin quitar lo que se pide */
+t("tengo 800 € de presupuesto", ({ a, b }) => price(a) < price(b));
+t("no quiero gastar más de 500 euros", ({ a, b }) => price(a) < price(b));
+t("que no pase de 1000 euros", ({ a }) => price(a) <= 1000);
+t("una estantería de 1,80 de ancho que no cueste más de 800 euros", ({ a }) => a.width === 1800 && price(a) <= 800);
+t("Quiero un armario de 2 metros de ancho por 2,40 de alto con puertas y 3 cajones, en blanco. Mi presupuesto es de 1500 euros",
+  ({ a }) => a.width === 2000 && a.material === "melamina_blanca" && a.columns.some((c) => c.door) && a.columns.some((c) => c.drawers >= 3));
+/* medidas de la habitación, no del mueble */
+t("un armario grande para una habitación de 3x4", ({ a }) => a.height === 2200 && a.width <= 2400);
+t("la habitación tiene 3 metros de ancho y quiero la estantería de 1,5", ({ a }) => a.width === 1500);
+t("huecos de 33x33 para cestas", ({ a, b }) => a.width === b.width && allCols(a, (c) => c.width >= 330 && c.cells.every((_, j) => cellClear(a, c, j) >= 330)));
+t("la pared mide 4 metros", ({ a, r }) => a.width === 3200 && r.notes.some((x) => /3\.200/.test(x)));
+
 /* no entendido → sugerencias */
 n++;
 const fb = fallback("blablá");
@@ -175,6 +237,21 @@ conv(["dos cajones en el segundo cuadro"], ({ a }) => col(a, 1).drawers === 2 &&
 conv(["en todas"], ({ r }) => r === null);
 conv(["Mejor los cajones a la derecha"], ({ a }) => col(a, 3).drawers === 2 && col(a, 0).drawers === 0, (b) => { b.columns[0].drawers = 2; });
 conv(["Cajones en todas las columnas"], ({ a }) => allCols(a, (c) => c.drawers === 2));
+/* un armario que ya existe: «el armario» habla de ese, no monta otro */
+const ARM = "armario de 2,40 de ancho, 2 m de alto, en nogal, con patas y pomos";
+conv([ARM, "que el armario sea blanco"], ({ a }) => a.width === 2400 && a.height === 2000 && a.base === "patas" && a.material === "melamina_blanca" && a.handle === "knob");
+conv([ARM, "me gusta el armario"], ({ a, r }) => !!r.ask && a.width === 2400 && a.material === "nogal");
+conv([ARM, "el armario un poco más ancho"], ({ a }) => a.width > 2400 && a.height === 2000);
+/* seguir con un armario: cajones y baldas fuera de la zona de colgar, módulos que no se comban */
+const armRails = (a) => a.columns.filter((c) => c.cells.some((x) => x.startsWith("rail")));
+conv(["un armario para la ropa", "ponle 3 cajones"], ({ a }) => armRails(a).length &&
+  a.columns.every((c) => !c.cells.slice(1).some((x) => /^drawer/.test(x))) && armRails(a).every((c) => c.cells.filter((x) => x.startsWith("rail")).length === 1));
+conv(["un armario para la ropa", "añade una balda"], ({ a }) => armRails(a).length && armRails(a).every((c) => c.cells.some((x, j) => x.startsWith("rail") && cellClear(a, c, j) >= 900)));
+conv(["un armario para la ropa", "2 cajones en la primera"], ({ a }) => col(a, 0).cells[0] === "drawer2" && col(a, 0).cells.some((x, j) => x.startsWith("rail") && cellClear(a, col(a, 0), j) >= 600));
+conv(["un armario para la ropa", "con barra"], ({ a, r }) => !!r.ask && armRails(a).length === 1);
+conv(["un armario para la ropa", "que mida 2,40 de ancho"], ({ a }) => a.width === 2400 && allCols(a, (c) => c.width <= 1000));
+conv(["un armario para la ropa", "que sea blanco"], ({ a }) => allCols(a, (c) => c.width <= maxSpan(a.material, a.thickness)));
+conv(["un armario para la ropa", "de 2 m de alto"], ({ a }) => a.height === 2000 && armRails(a).every((c) => cellClear(a, c, c.cells.length - 1) >= 250));
 
 for (const s of new Set(ALL_SUGGESTIONS)) {
   n++;

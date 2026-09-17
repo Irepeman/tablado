@@ -174,6 +174,28 @@ t("A wardrobe with a hanging section for long dresses and shelves for jumpers, a
     a.columns.some((c) => !c.cells.some((x) => x.startsWith("rail")) && c.shelves.length >= 3) &&
     a.columns.reduce((q, c) => q + c.cells.filter((x) => x === "door+drawer").length, 0) === 2);
 
+/* what the customer-phrase battery found */
+const railsEN = (a) => a.columns.filter((c) => c.cells.some((x) => x.startsWith("rail")));
+/* a colour before the part is the part's colour, not the unit's finish */
+t("oak unit with black knobs", ({ a }) => a.material === "roble" && a.handle === "knob", (p) => { p.material = "nogal"; });
+t("black legs", ({ a }) => a.material === "roble" && a.base === "patas");
+t("the handles in black", ({ a }) => a.material === "roble" && a.handle === "bar", (p) => { p.handle = "knob"; });
+t("black handles", ({ a, b }) => a.handle === "bar" && a.depth === b.depth && !railsEN(a).length, (p) => { p.handle = "knob"; });
+t("1.80 m tall on 15 cm legs", ({ a }) => a.height === 1800 && a.baseHeight === 150, (p) => { p.height = 2400; });
+/* gaps, walls, room doors, cupboards and budgets said the English way */
+t("it must fit a 90 cm gap", ({ a }) => a.width === 890);
+t("a 2 m bookcase", ({ a }) => a.width === 2000, (p) => { p.width = 1200; });
+t("white doors and an oak frame", ({ a }) => a.material === "roble" && a.columns.every((c) => c.door), (p) => { p.material = "nogal"; });
+t("33x33 cubbies for baskets", ({ a, b }) => a.width === b.width && a.columns.every((c) => c.width >= 330));
+t("a cupboard for towels", ({ a }) => !railsEN(a).length && a.columns.every((c) => c.door));
+t("I don't want to spend more than 600 euros", ({ a, b }) => price(a) < price(b));
+t("I have a 1.90 m gap in the hallway between the bathroom door and the wall. I want a cupboard 2.20 m high and shallow, about 40 cm deep, for towels and cleaning products. With doors, white, no handles. Two drawers at the bottom and shelves above.",
+  ({ a }) => a.width === 1890 && a.height === 2200 && a.depth === 400 && a.material === "melamina_blanca" && a.handle === "push" &&
+    !railsEN(a).length && a.columns.every((c) => c.drawers === 2 && c.door));
+t("I need a wardrobe for my 12 year old daughter. The wall is 2.40 m and the ceiling is 2.50. I want a hanging section for long dresses and another with shelves for jumpers, and a couple of drawers inside.",
+  ({ a }) => a.width === 2390 && a.height === 2410 && railsEN(a).length &&
+    a.columns.reduce((q, c) => q + c.cells.filter((x) => x === "door+drawer").length, 0) === 2);
+
 console.log(`\nchat EN: ${n} phrases · ${fails.length} failures\n`);
 fails.forEach((f) => console.log("  ✗ " + f));
 process.exit(fails.length ? 1 : 0);
