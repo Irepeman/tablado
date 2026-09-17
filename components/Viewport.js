@@ -11,7 +11,7 @@
    ============================================================ */
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight } from "@/lib/model";
+import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight, railPos, railRange } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 import { buildDecor, clearDecor, floorTexture } from "./decor";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -432,19 +432,14 @@ const Viewport = forwardRef(function Viewport(
       if (propsRef.current.placing) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza
       const hu0 = hit && hit.object.userData;
       if (hu0 && hu0.grp === "barra" && e.button === 0) {
-        /* la barra cuelga de la balda de encima: arrastrarla sube o baja esa balda.
-           En el hueco de arriba del todo no hay balda que mover: solo se elige. */
+        /* la barra va atornillada a los costados: arrastrarla la sube o la baja dentro de su hueco */
         const p = propsRef.current.params, c = p.columns[hu0.col];
-        if (c && hu0.cell < c.shelves.length) {
+        if (c) {
           const n = camera.getWorldDirection(new THREE.Vector3()).negate();
           st.dragPlane.setFromNormalAndCoplanarPoint(n, hit.point);
           st.ray.ray.intersectPlane(st.dragPlane, st.hitPt);
-          const lower = hu0.cell > 0 ? c.shelves[hu0.cell - 1] + p.thickness / 2 : 0;
-          st.drag = {
-            u: { ...hu0, shelf: hu0.cell }, axis: "y", start: st.hitPt.clone(),
-            base: c.shelves[hu0.cell], baseNext: 0, snap: deepCopy(p),
-            min: lower + 600 + p.thickness / 2,           // la barra necesita 60 cm libres debajo
-          };
+          st.drag = { u: hu0, axis: "rail", start: st.hitPt.clone(), base: railPos(p, c, hu0.cell),
+                      range: railRange(p, c, hu0.cell), snap: deepCopy(p) };
           st.mode = "drag";
         } else st.mode = "orbit";
         selectFrom(hu0);
@@ -518,13 +513,18 @@ const Viewport = forwardRef(function Viewport(
         const p = deepCopy(propsRef.current.params);
         const t = p.thickness;
         const Hi = p.height - p.baseHeight - 2 * t;
-        if (st.drag.axis === "y") {
+        if (st.drag.axis === "rail") {
+          const d = (st.hitPt.y - st.drag.start.y) * 1000;
+          const [a, z] = st.drag.range;
+          p.columns[st.drag.u.col].railAt = clamp(Math.round((st.drag.base + d) / 10) * 10, a, z);
+          propsRef.current.onChange(p);
+        } else if (st.drag.axis === "y") {
           const d = (st.hitPt.y - st.drag.start.y) * 1000;
           const c = p.columns[st.drag.u.col];
           const others = c.shelves.filter((_, i) => i !== st.drag.u.shelf);
           const fl = 0;
           // salto de 32 mm: el sistema 32 real de ebanistería
-          const v = clamp(Math.round((st.drag.base + d) / 32) * 32, Math.max(fl + 140, st.drag.min || 0), Hi - 140);
+          const v = clamp(Math.round((st.drag.base + d) / 32) * 32, fl + 140, Hi - 140);
           if (others.every((o) => Math.abs(o - v) >= 140)) {
             c.shelves[st.drag.u.shelf] = v;
             propsRef.current.onChange(p);

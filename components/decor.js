@@ -9,7 +9,7 @@
    Nada de esto entra en el despiece ni en el precio.
    ============================================================ */
 import * as THREE from "three";
-import { cellBounds, isRail, isDoor, BACK_T } from "@/lib/model";
+import { cellBounds, isRail, isDoor, BACK_T, railPos } from "@/lib/model";
 
 const MM = 0.001;
 const mats = new Map();
@@ -227,7 +227,7 @@ export function buildDecor(group, p, geo) {
       const r = rng(i * 7919 + j * 104729 + Math.round(w) * 31 + Math.round(h));
       const zOf = (d) => (zFront - 20 - d / 2) * MM;
       if (isRail(type)) {
-        const cl = clothes(w, hi - lo - 60, usableD, r);   // la barra va a 60 mm del techo del hueco
+        const cl = clothes(w, railPos(p, c, j) - lo, usableD, r);   // colgada de la barra, esté donde esté
         cl.position.set(xx * MM, y * MM, ((zFront + zBack) / 2) * MM);
         group.add(cl);
         return;
