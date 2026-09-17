@@ -58,7 +58,9 @@ export default function Catalog({ lang, placing, onTap, onDragMove, onDrop, onCl
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       setGhost(null);
-      if (d.on) onDrop(item, ev.clientX, ev.clientY);
+      /* cancelado (el navegador se ha quedado el gesto): no se suelta nada */
+      if (ev.type === "pointercancel") onDrop(item, NaN, NaN);
+      else if (d.on) onDrop(item, ev.clientX, ev.clientY);
       else onTap(item);
     };
     window.addEventListener("pointermove", move);

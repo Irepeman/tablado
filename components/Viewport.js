@@ -11,7 +11,7 @@
    ============================================================ */
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight, railPos, railRange } from "@/lib/model";
+import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight, railPos, railRange, setRailAt, doorKey } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 import { buildDecor, clearDecor, floorTexture } from "./decor";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -306,6 +306,7 @@ const Viewport = forwardRef(function Viewport(
     /* Hueco bajo un punto de la pantalla: el plano del hueco si se toca, y si se
        toca cualquier pieza (un frente, un costado), la columna y la altura del punto. */
     const targetAt = (clientX, clientY) => {
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
       const r = canvas.getBoundingClientRect();
       if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
       /* soltar encima del catálogo o de un panel no pone nada en el hueco que queda detrás */
@@ -378,11 +379,17 @@ const Viewport = forwardRef(function Viewport(
       clampTarget();
     };
 
-    const selectFrom = (u) => {
-      const { onSelect } = propsRef.current;
+    const selectFrom = (u, hit) => {
+      const { onSelect, params: p } = propsRef.current;
       if (u && u.grp === "balda") onSelect({ k: "shelf", col: u.col, shelf: u.shelf });
       else if (u && u.grp === "barra") onSelect({ k: "rail", col: u.col, cell: u.cell });
       else if (u && u.grp === "divisor") onSelect({ k: "div", div: u.div });
+      else if (u && u.cells && hit && st.geo && p.columns[u.col]) {
+        /* una puerta alta tapa varios huecos: se elige el que queda a la altura del toque */
+        const ym = (hit.point.y - st.root.position.y) * 1000 - st.geo.y0;
+        const j = clamp(cellAtHeight(p, p.columns[u.col], ym), u.cells[0], u.cells[1]);
+        onSelect({ k: "cell", col: u.col, cell: j });
+      }
       else if (u && u.col != null && u.cell != null) onSelect({ k: "cell", col: u.col, cell: u.cell });
       else onSelect(null);
     };
@@ -392,13 +399,15 @@ const Viewport = forwardRef(function Viewport(
     const tapOn = (hit) => {
       const u = hit ? hit.object.userData : null;
       const pr = propsRef.current;
+      if (pr.photo) return;                                      // en la foto no se elige nada
       if (u && u.grp === "frente" && u.hinge && !pr.exploded) {
         /* solo la hoja tocada: en un módulo con puerta alta y puerta baja, cada una va por su lado */
-        const isOpen = !!pr.open || (pr.openDoors || []).includes(u.id);
-        pr.onToggleDoor?.(u.id, !isOpen);
+        const key = doorKey(u);
+        const isOpen = !!pr.open || (pr.openDoors || []).includes(key);
+        pr.onToggleDoor?.(key, !isOpen, (st.geo?.parts || []).filter((x) => x.hinge).map(doorKey));
         if (isOpen) { pr.onSelect(null); return; }
       }
-      selectFrom(u);
+      selectFrom(u, hit);
     };
 
     const onDown = (e) => {
@@ -421,8 +430,9 @@ const Viewport = forwardRef(function Viewport(
       const hit = pickAt(e);
       /* con un hueco elegido, arrastrar su frente, su barra o su tirador lo lleva a otro hueco */
       const sel = propsRef.current.selection, hu = hit && hit.object.userData;
+      /* la barra no: arrastrarla cambia su altura (más abajo) */
       const own = sel && sel.k === "cell" && hu && hu.col === sel.col && e.button === 0 && !propsRef.current.placing &&
-        ["frente", "cajon", "barra", "hueco"].includes(hu.grp) &&
+        !propsRef.current.photo && ["frente", "cajon", "hueco"].includes(hu.grp) &&
         (hu.cells ? sel.cell >= hu.cells[0] && sel.cell <= hu.cells[1] : hu.cell === sel.cell) &&
         (propsRef.current.params.columns[sel.col]?.cells[sel.cell] || "open") !== "open";
       if (own) {
@@ -434,7 +444,7 @@ const Viewport = forwardRef(function Viewport(
                     touch: e.pointerType !== "mouse", armed: false };
         return;
       }
-      if (propsRef.current.placing) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza
+      if (propsRef.current.placing || propsRef.current.photo) { st.mode = "orbit"; return; }   // colocando: el toque pone la pieza · foto: solo mirar
       const hu0 = hit && hit.object.userData;
       if (hu0 && hu0.grp === "barra" && e.button === 0) {
         /* la barra va atornillada a los costados: arrastrarla la sube o la baja dentro de su hueco */
@@ -521,6 +531,7 @@ const Viewport = forwardRef(function Viewport(
       st.moved += Math.abs(dx) + Math.abs(dy);
 
       if (st.mode === "drag" && st.drag) {
+        if (st.moved <= 4) return;          // un toque con algo de temblor no mueve nada (y no quedaría en el historial)
         setPtr(e);
         st.ray.setFromCamera(st.ptr, camera);
         if (!st.ray.ray.intersectPlane(st.dragPlane, st.hitPt)) return;
@@ -530,7 +541,7 @@ const Viewport = forwardRef(function Viewport(
         if (st.drag.axis === "rail") {
           const d = (st.hitPt.y - st.drag.start.y) * 1000;
           const [a, z] = st.drag.range;
-          p.columns[st.drag.u.col].railAt = clamp(Math.round((st.drag.base + d) / 10) * 10, a, z);
+          setRailAt(p, p.columns[st.drag.u.col], st.drag.u.cell, clamp(Math.round((st.drag.base + d) / 10) * 10, a, z));
           propsRef.current.onChange(p);
         } else if (st.drag.axis === "y") {
           const d = (st.hitPt.y - st.drag.start.y) * 1000;
@@ -574,7 +585,7 @@ const Viewport = forwardRef(function Viewport(
         canvas.style.cursor = propsRef.current.placing ? "copy" : "";
         if (st.move.armed) {
           if (st.move.to && e.type === "pointerup") propsRef.current.onMoveCell?.(st.move.from, st.move.to);
-        } else if (st.moved <= 12) {
+        } else if (st.moved <= 12 && e.type === "pointerup") {
           tapOn(pickAt(e));
         }
         st.move = null;
@@ -928,7 +939,7 @@ const Viewport = forwardRef(function Viewport(
         const pivot = new THREE.Group();
         pivot.position.set((px + side * part.L / 2) / 1000, py / 1000, (pz + t / 2) / 1000);
         /* abierta si se abre todo, o si se ha abierto esa puerta tocándola */
-        const openHere = openNow || (!exploded && openDoors.includes(part.id));
+        const openHere = openNow || (!exploded && openDoors.includes(doorKey(part)));
         pivot.rotation.y = openHere ? side * 1.5 : 0;   // ~86°: las hojas vecinas no se cruzan
         m.position.set((-side * part.L / 2) / 1000, 0, -t / 2000);
         pivot.add(m);
@@ -1069,16 +1080,30 @@ const Viewport = forwardRef(function Viewport(
       const d = p.depth / 1000;
       c.tTarget.set(0, lift + h * 0.5, 0);
       /* distancia para que quepa a lo ancho y a lo alto con el aspecto real del visor:
-         en un móvil vertical el ancho manda, y antes el mueble salía cortado */
+         en un móvil vertical el ancho manda, y antes el mueble salía cortado.
+         Arriba van las medidas y los botones: el mueble se encaja en lo que queda debajo. */
       const rect = canvasRef.current.getBoundingClientRect();
-      const aspect = clamp(rect.width / Math.max(1, rect.height), 0.35, 3);
-      const vf = (st.camera.fov * Math.PI) / 360, hf = Math.atan(Math.tan(vf) * aspect);
+      let top = 0;
+      canvasRef.current.parentElement?.querySelectorAll(".vp-tl, .vp-tr").forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.height) top = Math.max(top, b.bottom - rect.top + 6);
+      });
+      top = clamp(top, 0, rect.height * 0.3);
+      const H0 = Math.max(1, rect.height), free = Math.max(1, H0 - top);
+      const vf0 = (st.camera.fov * Math.PI) / 360;
+      const vf = Math.atan((Math.tan(vf0) * free) / H0), hf = Math.atan((Math.tan(vf0) * rect.width) / H0);
       const fit = (ww, hh) => clamp(Math.max((hh / 2 + 0.1) / Math.tan(vf), (ww / 2 + 0.1) / Math.tan(hf)) * 1.12 + d / 2, R_MIN, R_MAX);
       /* el ángulo más cercano al actual: tras varias vueltas, no desenrosca todas */
       const near = (a) => a + 2 * Math.PI * Math.round((c.theta - a) / (2 * Math.PI));
       if (preset === "front") { c.tTheta = near(0); c.tPhi = Math.PI / 2; c.tR = fit(w, h); }
       if (preset === "34") { c.tTheta = near(-0.52); c.tPhi = 1.32; c.tR = fit(w * 0.87 + d * 0.5, h + d * 0.25); }
       if (preset === "top") { c.tTheta = near(-0.22); c.tPhi = 0.4; c.tR = fit(w, d + h * 0.4); }
+      if (top > 0 && preset) {
+        /* bajar el mueble en pantalla media franja: se mueve el objetivo hacia «arriba de la pantalla» */
+        const f = new THREE.Vector3(Math.sin(c.tPhi) * Math.sin(c.tTheta), Math.cos(c.tPhi), Math.sin(c.tPhi) * Math.cos(c.tTheta)).negate();
+        const up = new THREE.Vector3(0, 1, 0).addScaledVector(f, -f.y).normalize();
+        c.tTarget.addScaledVector(up, (top / 2) * ((2 * c.tR * Math.tan(vf0)) / H0));
+      }
       st.spin = null;
       if (instant) {
         c.theta = c.tTheta; c.phi = c.tPhi; c.r = c.tR; c.target.copy(c.tTarget);

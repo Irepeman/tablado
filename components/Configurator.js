@@ -21,7 +21,7 @@ import PhotoImport from "./PhotoImport";
 import {
   DEFAULT, normalize, build, validate,
   maxSpan, deepCopy, clamp, setCell, isRail, cellBounds, cellAtHeight, PRESETS,
-  canPlace, applyItem, moveCell, isDoor, setOwnDoor, railPos, railRange,
+  canPlace, applyItem, moveCell, isDoor, setOwnDoor, railPos, railRange, setRailAt, doorKey,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
@@ -85,14 +85,15 @@ export default function Configurator() {
   const [photoFile, setPhotoFile] = useState(null);   // { file, hint }
   const [placing, setPlacing] = useState(null);      // pieza del catálogo esperando un toque en un hueco
   const [dragItem, setDragItem] = useState(null);    // pieza del catálogo que se está arrastrando
-  const [openDoors, setOpenDoors] = useState([]);    // hojas abiertas tocándolas (id de la pieza)
-  const toggleDoor = useCallback((id, on) => {
-    if (!on) setOpenView(false);
-    setOpenDoors((xs) => (on ? (xs.includes(id) ? xs : [...xs, id]) : xs.filter((x) => x !== id)));
-  }, []);
-  /* hojas de la puerta que cubre un hueco */
-  const doorIdsAt = (col, cell) => (vp.current?.geo()?.parts || [])
-    .filter((x) => x.hinge && x.col === col && x.cells && cell >= x.cells[0] && cell <= x.cells[1]).map((x) => x.id);
+  const [openDoors, setOpenDoors] = useState([]);    // hojas abiertas tocándolas (doorKey: dónde está y cuánto mide)
+  /* tocar una hoja: con todo abierto («Abrir»), se cierra solo esa y las demás siguen abiertas */
+  const toggleDoor = (key, on, all = []) => {
+    if (!on && openView) { setOpenView(false); setOpenDoors(all.filter((k) => k !== key)); return; }
+    setOpenDoors((xs) => (on ? (xs.includes(key) ? xs : [...xs, key]) : xs.filter((x) => x !== key)));
+  };
+  /* hojas de la puerta que cubre un hueco, en el mueble ya cambiado */
+  const doorKeysAt = (p, col, cell) => build(normalize(p), lang).parts
+    .filter((x) => x.hinge && x.col === col && x.cells && cell >= x.cells[0] && cell <= x.cells[1]).map(doorKey);
   /* refleja en la cabecera lo que de verdad hay detrás, no lo que nos gustaría */
   const [copilotOn, setCopilotOn] = useState(null);
 
@@ -153,6 +154,24 @@ export default function Configurator() {
   }, []);
 
   useEffect(() => { vp.current?.frame("34", true); }, []);
+  /* una puerta que ya no existe (se ha quitado, partido o cambiado de tamaño) deja de estar abierta:
+     si no, al volver a poner una puerta ahí aparecería abierta */
+  useEffect(() => {
+    const keys = new Set(build(params).parts.filter((x) => x.hinge).map(doorKey));
+    setOpenDoors((xs) => (xs.every((k) => keys.has(k)) ? xs : xs.filter((k) => keys.has(k))));
+  }, [params]);
+  /* lo elegido tiene que seguir existiendo tras deshacer, el chat o quitar una columna */
+  const selValid = !!selection && (() => {
+    const c = params.columns[selection.col];
+    if (selection.k === "shelf") return c?.shelves[selection.shelf] != null;
+    if (selection.k === "cell") return c?.cells[selection.cell] != null;
+    if (selection.k === "rail") return isRail(c?.cells[selection.cell]);
+    if (selection.k === "div") return selection.div < params.columns.length - 1;
+    return false;
+  })();
+  useEffect(() => { if (selection && !selValid) setSelection(null); }, [selection, selValid]);
+  /* en el móvil, el editor del hueco y el catálogo ocupan el mismo sitio abajo */
+  useEffect(() => { if (selection && window.innerWidth <= 900) setShowParts(false); }, [selection]);
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape" && !/INPUT|TEXTAREA/.test(e.target.tagName)) { setSelection(null); setPlacing(null); }
@@ -322,9 +341,10 @@ export default function Configurator() {
     const Hi = params.height - params.baseHeight - 2 * params.thickness;
     const over = c.width > maxSpan(params.material, params.thickness);
     const set = (nv) => {
+      if (!Number.isFinite(nv) || nv === v) return;             // salir de la casilla sin cambiarla no es un cambio
       const others = c.shelves.filter((_, i) => i !== selection.shelf);
       const val = clamp(Math.round(nv / 32) * 32, 140, Hi - 140);
-      if (!others.every((o) => Math.abs(o - val) >= 140)) return;
+      if (val === v || !others.every((o) => Math.abs(o - val) >= 140)) return;
       onCommitEdit((() => { const n = deepCopy(params); n.columns[selection.col].shelves[selection.shelf] = val; return n; })());
     };
     return (
@@ -363,14 +383,15 @@ export default function Configurator() {
     const c = params.columns[selection.col];
     const j = selection.cell;
     if (!c || !isRail(c.cells[j])) return null;
-    const off = params.baseHeight + params.thickness;             // suelo interior del mueble
+    /* suelo interior del mueble, medido desde el suelo de la habitación (suspendido: colgado a 42 cm, como en el 3D) */
+    const off = params.baseHeight + params.thickness + (params.base === "flotante" ? 420 : 0);
     const railY = Math.round(railPos(params, c, j) + off);
     const [a, z] = railRange(params, c, j);
     const floorJ = cellBounds(params, c)[j] + (j > 0 ? params.thickness / 2 : 0);
     const set = (y) => {
-      if (!Number.isFinite(y)) return;
+      if (!Number.isFinite(y) || Math.round(clamp(y - off, a, z)) === Math.round(railY - off)) return;
       const n = deepCopy(params);
-      n.columns[selection.col].railAt = clamp(Math.round(y - off), a, z);
+      setRailAt(n, n.columns[selection.col], j, y - off);
       onCommitEdit(n);
     };
     return (
@@ -418,7 +439,7 @@ export default function Configurator() {
     /* dentro de un hueco con puerta: la puerta se queda abierta para ver lo que se ha puesto */
     const behindDoor = INSIDE.includes(item) && item !== "divider" && tg.cell != null &&
       isDoor(params.columns[tg.col]?.cells[tg.cell]);
-    if (behindDoor) doorIdsAt(tg.col, tg.cell).forEach((id) => toggleDoor(id, true));
+    if (behindDoor) doorKeysAt(n, tg.col, tg.cell).forEach((k) => toggleDoor(k, true));
     setSelection(null);
     vp.current?.flash(item.startsWith("h:") ? tg : { col: tg.col, cell: tg.cell }, item);
     return true;
@@ -478,7 +499,7 @@ export default function Configurator() {
             );
           })}
         </div>
-        {isDoor(c.cells[j]) && (openView || doorIdsAt(selection.col, j).some((id) => openDoors.includes(id))) && <p className="cellnote">{L.doorOpenHint}</p>}
+        {isDoor(c.cells[j]) && (openView || doorKeysAt(params, selection.col, j).some((k) => openDoors.includes(k))) && <p className="cellnote">{L.doorOpenHint}</p>}
         <button className="rowbtn" disabled={!canPlace(params, "shelf", selection.col, j).ok}
                 title={canPlace(params, "shelf", selection.col, j).ok ? L.itemsHelp.shelf : why(canPlace(params, "shelf", selection.col, j))}
                 onClick={() => { const n = deepCopy(params); if (applyItem(n, "shelf", selection.col, j).ok) onCommitEdit(n); }}>
@@ -551,7 +572,7 @@ export default function Configurator() {
           <button className="tbtn" aria-pressed={showScale} onClick={() => setShowScale((v) => !v)}>{L.scale}</button>
           <button className="tbtn" aria-pressed={exploded} onClick={() => setExploded((v) => !v)}>{L.exploded}</button>
           <button className="tbtn photo-btn" aria-pressed={photo} title={L.photoTitle}
-                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); setOpenDoors([]); }}>{L.photo}</button>
+                  onClick={() => { setPhoto((v) => !v); setSelection(null); setOpenView(false); setOpenDoors([]); setPlacing(null); }}>{L.photo}</button>
           <button className="tbtn" aria-pressed={founder} onClick={() => setFounder((v) => !v)}>{L.founder}</button>
           <button className="tbtn" onClick={undo}>{L.undo}</button>
         </div>
@@ -636,7 +657,7 @@ export default function Configurator() {
                 <button onClick={() => setPlacing(null)}>{L.cancel}</button>
               </div>
             )}
-            {selection && selBox && (
+            {selValid && selBox && (
               <div ref={selRef} className={"glass selbox on" + (selection.k === "cell" ? " wide" : "") + (selBox.dock ? " dock" : "")}
                    style={selBox.dock ? undefined : { left: selBox.x, top: selBox.y }}>
                 {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox() : selection.k === "rail" ? railBox() : divBox()}
