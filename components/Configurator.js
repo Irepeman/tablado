@@ -18,6 +18,7 @@ import Chat from "./Chat";
 import SpecRail from "./SpecRail";
 import Catalog from "./Catalog";
 import PhotoImport from "./PhotoImport";
+import Reserve from "./Reserve";
 import {
   DEFAULT, normalize, build, validate,
   maxSpan, deepCopy, clamp, setCell, isRail, cellBounds, cellAtHeight, PRESETS,
@@ -26,6 +27,7 @@ import {
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
 import { tr, num, matName, matShort } from "@/lib/i18n";
+import { logMiss } from "@/lib/record";
 
 const LANG_KEY = "cutwise-lang";
 /* piezas que van DENTRO del mueble: al colocarlas, las puertas se abren para ver dónde caen */
@@ -75,6 +77,7 @@ export default function Configurator() {
   const [exploded, setExploded] = useState(false);
   const [showScale, setShowScale] = useState(false);
   const [modal, setModal] = useState(null);
+  const [reserving, setReserving] = useState(false);   // formulario de reserva abierto
   const [toast, setToast] = useState("");
   const [selBox, setSelBox] = useState(null);
   const [tab, setTab] = useState("spec");
@@ -245,7 +248,12 @@ export default function Configurator() {
       say({ role: "ai", text: T.undone });
       return;
     }
-    if (res?.ask) { say({ role: "ai", text: res.ask, suggest: res.suggest }); return; }
+    if (res?.ask) {
+      /* ha contestado pero no ha cambiado nada: también es una pista de lo que falta */
+      logMiss(msg, params, lang, "ask");
+      say({ role: "ai", text: res.ask, suggest: res.suggest });
+      return;
+    }
     if (res) {
       const after = normalize(res.params);
       convo.current = { topic: res.topic, cols: res.cols, last: res.last };
@@ -270,6 +278,10 @@ export default function Configurator() {
             src: (en ? ms : ms.replace(".", ",")) + " ms" });
       return;
     }
+
+    /* el motor local no ha sabido: se apunta la frase, que es la única pista
+       de por dónde falla el producto (y lo único que guardamos del chat) */
+    logMiss(msg, params, lang, "none");
 
     if (copilot.current === false) { say(fb()); return; }
 
@@ -672,7 +684,7 @@ export default function Configurator() {
             onEdit={onEdit} onCommitEdit={onCommitEdit}
             onPushHistory={(snap) => { history.current.push(snap); }}
             onOrder={(q, rows, nested) => setModal({ q, rows, nested })}
-            onCsv={downloadCsv} onPreset={applyPreset}
+            onCsv={downloadCsv} onPreset={applyPreset} onReserve={() => setReserving(true)}
             onReset={() => { history.current.push(deepCopy(params)); setParams(normalize(DEFAULT())); setSelection(null); setOpenDoors([]); vp.current?.frame("34"); }}
           />
         </div>
@@ -702,6 +714,11 @@ export default function Configurator() {
             setTab("spec");
             setTimeout(() => vp.current?.frame("34"), 40);
           }} />
+      )}
+      {reserving && (
+        <Reserve params={params} lang={lang}
+                 onClose={() => setReserving(false)}
+                 onSaved={() => flash(L.reserveDone)} />
       )}
       {modal && (
         <div className="veil on" onClick={(e) => e.target === e.currentTarget && setModal(null)}>

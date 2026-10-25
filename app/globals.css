@@ -390,3 +390,15 @@ table.cut .r{text-align:right}
 /* editor de hueco: aviso de puerta abierta y botón de balda */
 .cellnote{margin:0 0 6px;font-size:11.5px;line-height:1.35;color:var(--ink-3)}
 .rowbtn:disabled{opacity:.45;cursor:default}
+/* reservar y registro */
+.modal.reserve{max-width:440px}
+.rf{display:block;margin:10px 0}
+.rf > span{display:block;font-size:12px;color:var(--ink-2);margin-bottom:4px}
+.rf .numin,.rf .sel{width:100%;box-sizing:border-box}
+.rf em{display:block;font-style:normal;font-size:11.5px;color:var(--ink-3);margin-top:3px}
+.rf em.err{color:#9b3b26}
+.rf.bad .numin{border-color:#9b3b26}
+.resumen{white-space:pre-wrap;font:12px/1.5 var(--mono,ui-monospace,monospace);background:var(--paper-2,#f3f5f0);border:1px solid var(--line);border-radius:8px;padding:10px;margin:10px 0 0}
+.founder.record .rec{border-top:1px solid var(--line);padding:6px 0;font-size:12px}
+.founder.record .rec small{display:block;color:var(--ink-3);font-size:11px;margin-top:2px}
+.founder.record .rec.miss{font-style:italic}

@@ -21,6 +21,7 @@ function PresetIcon({ k }) {
 }
 import { cutlist, nest, quote, PRICE } from "@/lib/pricing";
 import { tr, num, money, matShort } from "@/lib/i18n";
+import { reservations, misses, reservationsCsv, missesCsv, clearAll } from "@/lib/record";
 
 /* Campo numérico con borrador propio: se escribe libremente y el valor solo
    se aplica al pulsar Intro o salir del campo (Esc cancela). Antes, cada
@@ -63,8 +64,59 @@ function Seg({ options, value, onPick }) {
   );
 }
 
+/* ------------------------------------------------------------
+   EL REGISTRO (modo fundador)
+   Las reservas que ha dejado alguien y las frases que el chat no
+   entendió. Es lo único que el producto guarda, y es la materia prima
+   de lo que queremos defender: saber qué espacios y qué palabras reales
+   aparecen, y cuáles de ellos acaban en un encargo.
+   ------------------------------------------------------------ */
+function RecordPanel({ L }) {
+  const [book, setBook] = useState([]);
+  const [miss, setMiss] = useState([]);
+  const refresh = () => { setBook(reservations()); setMiss(misses()); };
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 2000);          // se llena mientras alguien usa la app
+    return () => clearInterval(t);
+  }, []);
+  const save = (name, text) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + text], { type: "text/csv;charset=utf-8" }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const when = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
+
+  return (
+    <div className="founder on record">
+      <h5>{L.recordTitle}</h5>
+      <div className="fr"><span>{L.recordBook(book.length)}</span><span>{L.recordMiss(miss.length)}</span></div>
+      {!book.length && !miss.length && <p className="catalog-note">{L.recordEmpty}</p>}
+      {book.slice(0, 4).map((r) => (
+        <div className="rec" key={r.ref}>
+          <b>{r.ref}</b> · {r.name} · {r.contact}
+          <small>{r.piece}{r.gap ? ` · hueco ${r.gap}` : ""} · {when(r.at)}</small>
+        </div>
+      ))}
+      {miss.slice(0, 4).map((m, i) => (
+        <div className="rec miss" key={m.at + i}>
+          “{m.text}”
+          <small>{m.lang} · {when(m.at)}</small>
+        </div>
+      ))}
+      <div className="cta-sub">
+        <button onClick={() => save("cutwise-reservas.csv", reservationsCsv())}>{L.recordCsv}</button>
+        <button onClick={() => { clearAll(); refresh(); }}>{L.recordClear}</button>
+      </div>
+      <p className="catalog-note">{L.recordNote}</p>
+    </div>
+  );
+}
+
 export default function SpecRail({
-  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset, onPreset, lang = "es",
+  params, selection, founder, onEdit, onCommitEdit, onPushHistory, onOrder, onCsv, onReset, onPreset, onReserve, lang = "es",
 }) {
   const L = tr(lang);
   const p = params;
@@ -346,6 +398,8 @@ export default function SpecRail({
           {L.priceSub(pieces, nested.sheets.length, matShort(p.material, lang))}
         </div>
 
+        {founder && <RecordPanel L={L} />}
+
         {founder && (
           <div className="founder on">
             <h5>{L.unitEco}</h5>
@@ -361,8 +415,9 @@ export default function SpecRail({
           </div>
         )}
 
-        <button className="cta" onClick={() => onOrder(q, rows, nested)}>{L.order}</button>
+        <button className="cta" onClick={onReserve}>{L.reserve}</button>
         <div className="cta-sub">
+          <button onClick={() => onOrder(q, rows, nested)}>{L.order}</button>
           <button onClick={() => onCsv(rows, q)}>{L.csv}</button>
           <button onClick={onReset}>{L.reset}</button>
         </div>
