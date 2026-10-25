@@ -15,7 +15,7 @@ copilot for chat messages the on-device engine cannot parse.
 
 ## Read it in this order
 
-1. **`doc.md`** — the architecture document: principles, the pipeline, the module map, what the engine
+1. **`architecturedoc.md`** — the architecture document: principles, the pipeline, the module map, what the engine
    knows about furniture, how the price is derived, and the open assumptions. Start here.
 2. **`lib/model.js`** — the engine, and the only place furniture is defined. `normalize()` is the
    safety net that every input passes through; `build()` turns parameters into parts that carry both
