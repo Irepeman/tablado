@@ -79,13 +79,15 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 | `components/decor.js` | 363 | Books, clothes, plants and a TV, for photo mode only. Never in the cut list |
 | `components/wood.js` | 313 | Procedural wood: grain at physical scale, per panel, with real edges |
 | `components/{Catalog,Chat,PhotoImport}.js` | 414 | Parts catalogue, chat panel, photo import dialog |
+| `lib/record.js` | 108 | The record: reservations, unresolved phrases, CSV export. The only data the product keeps |
+| `components/Reserve.js` | 96 | The reserve form: the gap's measurements, how they were taken, and one contact |
 | `app/api/design/route.js` | 163 | Optional server copilot. Returns parameters validated with zod, then normalized |
 
-Total application code: about 7,100 lines, plus 1,500 lines of tests.
+Total application code: about 7,300 lines, plus 1,600 lines of tests.
 
 ---
 
-## 4. The three ways to design a piece
+## 4. The three ways to design a piece, and the one way out
 
 **Direct manipulation.** Sliders and column controls; drag a shelf or a divider in the 3D view; tap a
 compartment to change what it holds; drag a part (door, drawers, rail, handle) from the catalogue onto
@@ -105,6 +107,10 @@ each compartment by brightness, texture and edges, detect handles, drop the plin
 then map the result onto the engine's columns and compartments. The photo never leaves the device.
 
 ---
+
+**And one way out: the reservation.** Any design can become a reservation: the gap's measurements,
+how they were taken, a name and one contact, kept with the whole piece and its reference. It is the
+only moment the product asks for anything personal, and the only thing it stores.
 
 ## 5. What the engine knows about furniture
 
@@ -146,7 +152,7 @@ least certain part of the product.
 
 ## 7. Tests
 
-`npm test` runs six files and takes about two seconds.
+`npm test` runs seven files and takes about two seconds.
 
 | File | What it proves |
 | --- | --- |
@@ -155,6 +161,7 @@ least certain part of the product.
 | `tests/photo.mjs` | 40 synthetic photos, including perspective and visible side panels |
 | `tests/chat.mjs` · `chat-en.mjs` | 329 phrases written the way customers write them |
 | `tests/corpus.mjs` | 226 cases that must never regress |
+| `tests/record.mjs` | 16 checks on the record: what a reservation must carry, and that a CSV survives quotes and missing fields |
 
 The suite is the gate: if anything fails, nothing is deployed. It is also what made parallel AI review
 possible — three agents could edit the same codebase because the tests graded them.
@@ -183,8 +190,10 @@ API as a hard dependency, because the product has to work when we cannot pay.
 - **Rectangular pieces only.** No sloped ceilings or spaces under stairs, although both appear in our
   own problem statement.
 - **The chat is rules, not a model.** Free and instant, and it fails on phrasing we did not anticipate.
-- **Nothing is stored.** No accounts, no saved designs, and no log of what the chat failed to
-  understand, which is why eighteen chat bugs sat there until a user hit them.
+- **We keep as little as possible.** No accounts and no saved designs: the only things the product
+  stores are the reservations someone leaves and the phrases the chat could not resolve, and both
+  live in that person's own browser. It is enough to learn from the first customers and not enough
+  after that, and we prefer that order.
 - **Prices come from estimated costs**, not from supplier quotes.
 - **Realism over physical simulation.** Photo mode is there to make people trust the piece, not to
   compute light accurately.
@@ -193,11 +202,12 @@ API as a hard dependency, because the product has to work when we cannot pay.
 
 ## 10. Data we keep
 
-Today: nothing. No accounts, no saved designs, no cookies, no analytics, and no log of what the chat
-fails to understand. That is a deliberate tradeoff that has already cost us — eighteen chat failures
-sat in the product until a user ran into them — and it is the next thing to change.
+For most of the project we stored nothing at all: no accounts, no saved designs, no cookies, no
+analytics. That cost us. Eighteen chat failures sat in the product until a user ran into them,
+because nothing was written down. The record is the answer, and it is now in the app: a reservation
+from any design, and every phrase the chat could not resolve.
 
-What we will keep, once the reserve flow exists, and why each field earns its place:
+What we keep, and why each field earns its place:
 
 | Field | Why we need it | Note |
 | --- | --- | --- |
@@ -207,6 +217,10 @@ What we will keep, once the reserve flow exists, and why each field earns its pl
 | Timestamp and whether they committed | The only honest measure of whether anyone wants this | |
 | Later: the workshop, the quote, the real cost, the lead time, and any piece remade | Turns our estimated prices into measured ones | Added when the first order is cut |
 | Every phrase the chat could not parse, with the design at that moment | Fixes the product where it actually breaks | No contact details attached |
+
+Where it lives: in the browser of whoever writes it. There is no server and no account, so nobody
+can read anyone else's, and a reservation reaches us only when its owner sends it. Founder mode
+reads the record and exports it as CSV, which is what the selling side works from.
 
 What we will never keep: card details (a payment provider handles those, we never see them), postal
 addresses before an order exists, and anything we cannot explain to the person who gave it to us.
@@ -219,10 +233,11 @@ addresses before an order exists, and anything we cannot explain to the person w
 3. Customers can measure their own space accurately enough that the piece fits.
 4. The 56% gross margin survives contact with real supplier prices.
 
-What we are building next is the one thing that tests all four: a reserve flow with a refundable €50
-deposit that stores the design, the measurements and whether it converted, plus logging of the phrases
-the chat does not understand. That is also the first piece of the only defense we think we can own: a
-record of real spaces, real cut lists and real workshop costs.
+The reserve flow is how we start testing them: a design turns into a reservation with the gap's
+measurements, how they were taken and one contact, which is what a sales conversation needs. What it
+does not do yet is take the deposit, because that needs a payment provider. The next assumption, and
+a new one, is that a refundable €50 deposit is the right thing to ask for, rather than a signature,
+a pre-order or nothing at all.
 
 ---
 
@@ -242,4 +257,5 @@ record of real spaces, real cut lists and real workshop costs.
 | 28 Sep | Doors no longer move between compartments on touch | A long press was moving them by accident on iPad |
 | 13 Oct | Copycat test: an AI rebuilt the visible product in ~30 minutes | It matched our published price exactly and missed by 47% elsewhere |
 | 13 Oct | Hackathon: shipped the conversational design path and scrapped the rest | We tried several ways for a customer to shape a piece; only one had to survive, and talking to it beat every menu we tried |
-| 25 Oct | Renamed this file `architecturedoc.md`, added "Data we keep" | The course names the file; and the next thing we build is the first data we will ever store |
+| 25 Oct | Renamed this file `architecturedoc.md`, added "Data we keep" | The course names the file, and the record needed somewhere to be written down |
+| 25 Oct | The record ships: reservations, unresolved phrases, CSV in founder mode | A design that dies on the screen teaches us nothing; now it becomes a lead and a list of what to fix |
