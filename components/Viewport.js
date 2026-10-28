@@ -286,19 +286,20 @@ const Viewport = forwardRef(function Viewport(
     }
     /* dónde y cómo se enseña la flecha para un canto exterior */
     st.edgeOf = (u, point) => {
-      if (!u || u.grp !== "carcasa") return null;
       const p = propsRef.current.params;
-      /* solo la cara de FUERA: por dentro del mueble se sigue tocando el hueco */
+      const mk = (axis, sx) => (axis === "w"
+        ? { axis, sx, pos: [sx * (p.width / 2 + 60) / 1000, point.y - st.root.position.y, point.z], rot: 0 }
+        : { axis, sx: 1, pos: [point.x, (p.height + 60) / 1000, point.z], rot: Math.PI / 2 });
+      /* la franja de aire pegada al costado o al techo: el sitio fácil de agarrar */
+      if (u?.grp === "canto") return mk(u.axis, u.sx);
+      if (!u || u.grp !== "carcasa") return null;
+      /* y también la cara de fuera del propio tablero; por dentro no, ahí están los huecos */
       const x = point.x * 1000, y = (point.y - st.root.position.y) * 1000, tol = 4;
-      if ((u.id === "lat_i" || u.id === "lat_d")) {
+      if (u.id === "lat_i" || u.id === "lat_d") {
         const sx = u.id === "lat_d" ? 1 : -1;
-        if (Math.abs(x - sx * p.width / 2) > tol) return null;
-        return { axis: "w", sx, pos: [sx * (p.width / 2 + 60) / 1000, point.y - st.root.position.y, point.z], rot: 0 };
+        return Math.abs(x - sx * p.width / 2) > tol ? null : mk("w", sx);
       }
-      if (u.id.startsWith("techo")) {
-        if (Math.abs(y - p.height) > tol) return null;
-        return { axis: "h", sx: 1, pos: [point.x, (p.height + 60) / 1000, point.z], rot: Math.PI / 2 };
-      }
+      if (u.id.startsWith("techo")) return Math.abs(y - p.height) > tol ? null : mk("h", 1);
       return null;
     };
     st.showArrow = (edge) => {
@@ -334,8 +335,12 @@ const Viewport = forwardRef(function Viewport(
     const pickAt = (e) => {
       setPtr(e);
       st.ray.setFromCamera(st.ptr, camera);
-      const hits = st.ray.intersectObjects(st.meshes, false);
-      if (!hits.length) return null;
+      const all = st.ray.intersectObjects(st.meshes, false);
+      if (!all.length) return null;
+      /* las bandas de estirar son aire pegado al mueble: solo cuentan si el
+         rayo no toca ninguna pieza, para que nunca roben un hueco ni un frente */
+      const hits = all.filter((h) => h.object.userData?.grp !== "canto");
+      if (!hits.length) return all[0];
       const first = hits[0];
       const solid = hits.find((h) => h.object.userData?.grp !== "hueco");
       /* la barra de colgar es fina y está al fondo: si el rayo la toca, es que se apunta a ella */
@@ -349,7 +354,7 @@ const Viewport = forwardRef(function Viewport(
     const pointUnder = (e) => {
       setPtr(e);
       st.ray.setFromCamera(st.ptr, camera);
-      const hits = st.ray.intersectObjects(st.meshes, false);
+      const hits = st.ray.intersectObjects(st.meshes, false).filter((h) => h.object.userData?.grp !== "canto");
       if (hits.length) return hits[0].point.clone();
       const n = camera.getWorldDirection(new THREE.Vector3()).negate();
       const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(n, st.cam.tTarget);
@@ -370,7 +375,7 @@ const Viewport = forwardRef(function Viewport(
       if (!geo) return null;
       for (const h of st.ray.intersectObjects(st.meshes, false)) {
         const u = h.object.userData;
-        if (!u) continue;
+        if (!u || u.grp === "canto") continue;
         if (u.grp === "hueco") return { col: u.col, cell: u.cell };
         const t = p.thickness;
         const xm = h.point.x * 1000, ym = (h.point.y - st.root.position.y) * 1000 - geo.y0;
@@ -1122,6 +1127,23 @@ const Viewport = forwardRef(function Viewport(
         st.root.add(leg);
         st.meshes.push(leg);
       });
+    }
+
+    /* franjas invisibles pegadas a los costados y al techo: son el sitio donde
+       agarrar el mueble para estirarlo, sin poner nada a la vista */
+    if (!exploded) {
+      const band = 90, zone = (pos, size, data) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(size[0] / 1000, size[1] / 1000, size[2] / 1000), st.pickMat);
+        m.position.set(pos[0] / 1000, pos[1] / 1000, pos[2] / 1000);
+        m.visible = false;
+        m.userData = data;
+        st.root.add(m);
+        st.meshes.push(m);
+      };
+      [[-1], [1]].forEach(([sx]) => zone(
+        [sx * (p.width / 2 + band / 2), p.height / 2, 0], [band, p.height, p.depth],
+        { grp: "canto", axis: "w", sx }));
+      zone([0, p.height + band / 2, 0], [p.width, band, p.depth], { grp: "canto", axis: "h", sx: 1 });
     }
 
     st.root.position.y = p.base === "flotante" ? 0.42 : 0;
