@@ -160,10 +160,9 @@ const Viewport = forwardRef(function Viewport(
       chromeMat: new THREE.MeshStandardMaterial({ color: 0xd9d9d6, roughness: 0.22, metalness: 1 }),
       railSelMat: new THREE.MeshStandardMaterial({ color: 0xc97a3c, roughness: 0.35, metalness: 0.4,
         emissive: new THREE.Color(0x8a3f12), emissiveIntensity: 0.3 }),
-      /* tiradores de esquina: para agrandar o encoger el mueble entero */
-      gripMat: new THREE.MeshStandardMaterial({ color: 0x2e5e45, roughness: 0.3, metalness: 0.1,
-        emissive: new THREE.Color(0x14301f), emissiveIntensity: 0.35 }),
-      grips: [],
+      /* flecha doble que sale al tocar un canto exterior, para estirar el mueble */
+      gripMat: new THREE.MeshStandardMaterial({ color: 0x2e5e45, roughness: 0.35, metalness: 0.05,
+        emissive: new THREE.Color(0x14301f), emissiveIntensity: 0.4, transparent: true, opacity: 0.95 }),
       brassMat: new THREE.MeshStandardMaterial({ color: 0xc19a5b, roughness: 0.3, metalness: 1 }),
       aluMat: new THREE.MeshStandardMaterial({ color: 0xbfc2c3, roughness: 0.38, metalness: 1 }),
       recessMat: new THREE.MeshStandardMaterial({ color: 0x151513, roughness: 0.55, metalness: 0.4 }),
@@ -268,6 +267,48 @@ const Viewport = forwardRef(function Viewport(
       }
       writeCam();
     };
+    /* la flecha doble: dos puntas y un eje; se gira para el ancho o para el alto */
+    {
+      const g = new THREE.Group();
+      [-1, 1].forEach((sg) => {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.04, 18), st.gripMat);
+        cone.position.x = sg * 0.062;
+        cone.rotation.z = sg > 0 ? -Math.PI / 2 : Math.PI / 2;
+        g.add(cone);
+      });
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, 0.1, 12), st.gripMat);
+      bar.rotation.z = Math.PI / 2;
+      g.add(bar);
+      g.visible = false;
+      g.renderOrder = 3;
+      st.arrow = g;
+      scene.add(g);
+    }
+    /* dónde y cómo se enseña la flecha para un canto exterior */
+    st.edgeOf = (u, point) => {
+      if (!u || u.grp !== "carcasa") return null;
+      const p = propsRef.current.params;
+      /* solo la cara de FUERA: por dentro del mueble se sigue tocando el hueco */
+      const x = point.x * 1000, y = (point.y - st.root.position.y) * 1000, tol = 4;
+      if ((u.id === "lat_i" || u.id === "lat_d")) {
+        const sx = u.id === "lat_d" ? 1 : -1;
+        if (Math.abs(x - sx * p.width / 2) > tol) return null;
+        return { axis: "w", sx, pos: [sx * (p.width / 2 + 60) / 1000, point.y - st.root.position.y, point.z], rot: 0 };
+      }
+      if (u.id.startsWith("techo")) {
+        if (Math.abs(y - p.height) > tol) return null;
+        return { axis: "h", sx: 1, pos: [point.x, (p.height + 60) / 1000, point.z], rot: Math.PI / 2 };
+      }
+      return null;
+    };
+    st.showArrow = (edge) => {
+      const a = st.arrow;
+      if (!edge || propsRef.current.photo || propsRef.current.exploded) { a.visible = false; return; }
+      a.position.set(edge.pos[0], edge.pos[1] + st.root.position.y, edge.pos[2]);
+      a.rotation.z = edge.rot;
+      a.visible = true;
+    };
+
     st.stepCam = stepCam;
     st.clampTarget = clampTarget;
     /* distancia mínima a la que un mueble de w×h×d cabe entero en el visor */
@@ -297,9 +338,7 @@ const Viewport = forwardRef(function Viewport(
       if (!hits.length) return null;
       const first = hits[0];
       const solid = hits.find((h) => h.object.userData?.grp !== "hueco");
-      /* la esquina y la barra son finas: si el rayo las toca, es que se apunta a ellas */
-      const grip = hits.find((h) => h.object.userData?.grp === "esquina");
-      if (grip) return grip;
+      /* la barra de colgar es fina y está al fondo: si el rayo la toca, es que se apunta a ella */
       if (solid && solid.object.userData.grp === "barra") return solid;
       if (solid && solid.object.userData.drag && solid.distance - first.distance < 0.07) return solid;
       if (first.object.userData?.grp === "hueco") return first;
@@ -475,17 +514,23 @@ const Viewport = forwardRef(function Viewport(
         selectFrom(hu0);
         return;
       }
-      if (hu0 && hu0.grp === "esquina" && e.button === 0) {
-        /* la esquina estira el mueble entero: el plano de arrastre mira a la cámara */
+      const edge0 = hit ? st.edgeOf(hu0, hit.point) : null;
+      if (edge0 && e.button === 0) {
+        /* el canto exterior estira el mueble: el plano de arrastre mira a la cámara */
         const p = propsRef.current.params;
         const n = camera.getWorldDirection(new THREE.Vector3()).negate();
         st.dragPlane.setFromNormalAndCoplanarPoint(n, hit.point);
         st.ray.ray.intersectPlane(st.dragPlane, st.hitPt);
-        st.drag = { u: hu0, axis: "corner", start: st.hitPt.clone(),
+        /* lo que separa el dedo del canto: así el canto va pegado al dedo, no al doble */
+        const off = edge0.axis === "w"
+          ? edge0.sx * (p.width / 2) - st.hitPt.x * 1000
+          : p.height - (st.hitPt.y - st.root.position.y) * 1000;
+        st.drag = { edge: edge0, axis: "size", start: st.hitPt.clone(), off,
                     base: { width: p.width, height: p.height }, snap: deepCopy(p) };
         st.mode = "drag";
+        st.showArrow(edge0);
         propsRef.current.onSelect?.(null);
-        canvas.style.cursor = "nwse-resize";
+        canvas.style.cursor = edge0.axis === "w" ? "ew-resize" : "ns-resize";
         return;
       }
       if (hit && hit.object.userData.drag && e.button === 0) {
@@ -506,11 +551,14 @@ const Viewport = forwardRef(function Viewport(
     };
 
     const onMove = (e) => {
-      /* sin arrastrar nada: el cursor avisa de que una esquina se puede estirar */
+      /* sin arrastrar nada: al pasar por un canto exterior sale la flecha de estirar */
       if (!st.pointers.size && !propsRef.current.placing && !propsRef.current.photo) {
         const over = pickAt(e);
-        canvas.style.cursor = over?.object.userData?.grp === "esquina" ? "nwse-resize"
-          : over?.object.userData?.drag ? (over.object.userData.drag === "x" ? "ew-resize" : "ns-resize") : "";
+        const u = over?.object.userData;
+        const edge = over ? st.edgeOf(u, over.point) : null;
+        st.showArrow(edge);
+        canvas.style.cursor = edge ? (edge.axis === "w" ? "ew-resize" : "ns-resize")
+          : u?.drag ? (u.drag === "x" ? "ew-resize" : "ns-resize") : "";
       }
       /* colocando una pieza del catálogo: el hueco bajo el puntero se resalta */
       if (!st.pointers.size && propsRef.current.placing) {
@@ -573,20 +621,24 @@ const Viewport = forwardRef(function Viewport(
         const p = deepCopy(propsRef.current.params);
         const t = p.thickness;
         const Hi = p.height - p.baseHeight - 2 * t;
-        if (st.drag.axis === "corner") {
-          const u = st.drag.u;
-          /* el mueble está centrado en x: la mitad del ancho es la distancia al eje */
-          const dx = (st.hitPt.x - st.drag.start.x) * 1000;
-          const width = st.drag.base.width + 2 * u.sx * dx;
-          let height = st.drag.base.height;
-          if (u.top) {
-            const dy = (st.hitPt.y - st.drag.start.y) * 1000;
-            height = st.drag.base.height + dy;
+        if (st.drag.axis === "size") {
+          const ed = st.drag.edge;
+          let { width, height } = st.drag.base;
+          if (ed.axis === "w") {
+            /* el canto sigue al dedo; el mueble está centrado, así que crece por los dos lados */
+            const edgeX = st.hitPt.x * 1000 + st.drag.off;
+            width = 2 * ed.sx * edgeX;
+          } else {
+            height = (st.hitPt.y - st.root.position.y) * 1000 + st.drag.off;
           }
-          propsRef.current.onChange(scaleTo(propsRef.current.params, {
-            width: Math.round(width / 10) * 10,
-            height: Math.round(height / 10) * 10,
-          }));
+          const next = scaleTo(propsRef.current.params, {
+            width: Math.round(width / 10) * 10, height: Math.round(height / 10) * 10,
+          });
+          propsRef.current.onChange(next);
+          /* la flecha acompaña al canto mientras se estira */
+          st.showArrow(ed.axis === "w"
+            ? { ...ed, pos: [ed.sx * (next.width / 2 + 60) / 1000, ed.pos[1], ed.pos[2]] }
+            : { ...ed, pos: [ed.pos[0], (next.height + 60) / 1000, ed.pos[2]] });
           st.last = { x: e.clientX, y: e.clientY };
           return;
         }
@@ -653,7 +705,7 @@ const Viewport = forwardRef(function Viewport(
       }
       if (st.mode === "drag" && st.drag) {
         if (st.moved > 4) propsRef.current.onCommit(st.drag.snap);
-        if (st.drag.axis === "corner") {
+        if (st.drag.axis === "size") {
           canvas.style.cursor = "";
           /* el mueble ha cambiado de tamaño: se encuadra otra vez, sin girarlo */
           const q = propsRef.current.params;
@@ -734,7 +786,10 @@ const Viewport = forwardRef(function Viewport(
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
-    const onLeave = () => { if (!st.pointers.size) showDrop(null); };
+    const onLeave = () => {
+      if (!st.pointers.size) showDrop(null);
+      if (!st.drag) { st.showArrow(null); canvas.style.cursor = ""; }
+    };
     canvas.addEventListener("pointerleave", onLeave);
     canvas.addEventListener("gesturestart", onGestureStart);
     canvas.addEventListener("gesturechange", onGestureChange);
@@ -755,11 +810,8 @@ const Viewport = forwardRef(function Viewport(
         camera.updateProjectionMatrix();
       }
       stepCam();
-      /* los tiradores de esquina se ven siempre del mismo tamaño, estés cerca o lejos */
-      if (st.grips.length) {
-        const k = clamp(0.026 * st.cam.r, 0.04, 0.12) / 0.032;
-        st.grips.forEach((g) => g.scale.setScalar(k));
-      }
+      /* la flecha se ve siempre del mismo tamaño, estés cerca o lejos */
+      if (st.arrow?.visible) st.arrow.scale.setScalar(clamp(st.cam.r * 0.33, 0.6, 2.2));
       if (st.photoOn && st.ph) {
         const ph = st.ph, now = performance.now();
         const bw = renderer.domElement.width, bh = renderer.domElement.height;
@@ -1070,25 +1122,6 @@ const Viewport = forwardRef(function Viewport(
         st.root.add(leg);
         st.meshes.push(leg);
       });
-    }
-
-    /* ---------- tiradores de esquina ----------
-       Cuatro cubos en las esquinas de la cara de delante. Tirando de los de
-       arriba el mueble crece de ancho y de alto; los de abajo solo de ancho.
-       No se dibujan en el despiece ni en la foto: son herramienta, no mueble. */
-    st.grips = [];
-    if (!exploded && !st.photoOn) {
-      const gs = 0.032, z = (p.depth / 2 + 10) / 1000;
-      const xs = [[-1, "l"], [1, "r"]], ys = [[p.height / 1000, "t"], [(p.base === "flotante" ? 0 : p.baseHeight / 2) / 1000, "b"]];
-      xs.forEach(([sx, hx]) => ys.forEach(([y, hy]) => {
-        const g = new THREE.Mesh(new RoundedBoxGeometry(gs, gs, gs, 2, 0.006), st.gripMat);
-        g.position.set((sx * p.width / 2) / 1000, y, z);
-        g.userData = { grp: "esquina", corner: hy + hx, sx, top: hy === "t" };
-        g.castShadow = false;
-        st.root.add(g);
-        st.meshes.push(g);
-        st.grips.push(g);
-      }));
     }
 
     st.root.position.y = p.base === "flotante" ? 0.42 : 0;
