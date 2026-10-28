@@ -267,47 +267,98 @@ const Viewport = forwardRef(function Viewport(
       }
       writeCam();
     };
-    /* la flecha doble: dos puntas y un eje; se gira para el ancho o para el alto */
+    /* El borde de fuera: al tocarlo se enciende TODO el contorno del mueble —las
+       doce aristas— y salen tres asas, una a cada lado y otra arriba, para
+       estirarlo o encogerlo. Antes solo salía una flecha suelta junto al canto:
+       no se veía qué estabas cogiendo. */
     {
-      const g = new THREE.Group();
-      [-1, 1].forEach((sg) => {
-        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.04, 18), st.gripMat);
-        cone.position.x = sg * 0.062;
-        cone.rotation.z = sg > 0 ? -Math.PI / 2 : Math.PI / 2;
-        g.add(cone);
+      const edgeMat = new THREE.MeshBasicMaterial({ color: 0x2e5e45, transparent: true, opacity: 0.9, depthWrite: false });
+      const markMat = new THREE.MeshBasicMaterial({ color: 0xf6f3ea, depthTest: false, transparent: true });
+      st.gripMat.depthTest = false;
+      const frame = new THREE.Group();
+      frame.visible = false;
+      frame.renderOrder = 4;
+      st.bars = Array.from({ length: 12 }, () => {
+        const b = new THREE.Mesh(st.box, edgeMat);
+        b.renderOrder = 4;
+        frame.add(b);
+        return b;
       });
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, 0.1, 12), st.gripMat);
-      bar.rotation.z = Math.PI / 2;
-      g.add(bar);
-      g.visible = false;
-      g.renderOrder = 3;
-      st.arrow = g;
-      scene.add(g);
+      root.add(frame);
+      st.frame = frame;
+
+      /* un asa: una chapa redondeada con la flecha doble encima, siempre de cara
+         a quien mira, y una zona de agarre invisible más ancha que el dibujo */
+      st.hands = [["w", -1], ["w", 1], ["h", 1]].map(([axis, sx]) => {
+        const g = new THREE.Group();
+        const plate = new THREE.Mesh(new RoundedBoxGeometry(0.148, 0.074, 0.014, 3, 0.03), st.gripMat);
+        plate.renderOrder = 12;
+        g.add(plate);
+        [-1, 1].forEach((sg) => {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(0.0155, 0.031, 16), markMat);
+          cone.position.set(sg * 0.044, 0, 0.0085);
+          cone.rotation.z = sg > 0 ? -Math.PI / 2 : Math.PI / 2;
+          cone.renderOrder = 13;
+          g.add(cone);
+        });
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0048, 0.0048, 0.064, 10), markMat);
+        bar.rotation.z = Math.PI / 2;
+        bar.position.z = 0.0085;
+        bar.renderOrder = 13;
+        g.add(bar);
+        const pick = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.08), st.pickMat);
+        pick.userData = { grp: "asa", axis, sx };
+        g.add(pick);
+        g.visible = false;
+        root.add(g);
+        return { g, pick, axis, sx };
+      });
+      st.picks = st.hands.map((h) => h.pick);
     }
-    /* dónde y cómo se enseña la flecha para un canto exterior */
+    /* el contorno y las asas, puestos sobre el mueble de ahora y del tamaño de
+       siempre en pantalla, estés cerca o lejos */
+    st.layoutEdge = () => {
+      const p = propsRef.current.params;
+      const W = p.width / 1000, H = p.height / 1000, D = p.depth / 1000;
+      const t = clamp(st.cam.r * 0.009, 0.011, 0.032);
+      const w = W + t, d = D + t;                       // el contorno abraza el mueble por fuera
+      let i = 0;
+      const set = (x, y, z, sx, sy, sz) => { const b = st.bars[i++]; b.position.set(x, y, z); b.scale.set(sx, sy, sz); };
+      [0, H].forEach((y) => [-d / 2, d / 2].forEach((z) => set(0, y, z, w, t, t)));
+      [-w / 2, w / 2].forEach((x) => [-d / 2, d / 2].forEach((z) => set(x, H / 2, z, t, H, t)));
+      [-w / 2, w / 2].forEach((x) => [0, H].forEach((y) => set(x, y, 0, t, t, d)));
+      /* las asas van montadas sobre el borde, no flotando fuera: así nunca se
+         salen del encuadre y se ve que son de ese borde */
+      const s = clamp(st.cam.r * 0.27, 0.5, 1.7);
+      st.hands.forEach((hd) => {
+        hd.g.scale.setScalar(s);
+        if (hd.axis === "w") hd.g.position.set(hd.sx * W / 2, H / 2, 0);
+        else hd.g.position.set(0, H, 0);
+        hd.g.quaternion.copy(camera.quaternion);
+        if (hd.axis === "h") hd.g.rotateZ(Math.PI / 2);
+      });
+    };
+    /* encender o apagar el borde entero */
+    st.showEdge = (on) => {
+      const live = !!on && !propsRef.current.photo && !propsRef.current.exploded && !propsRef.current.placing;
+      if (live) st.layoutEdge();
+      st.frame.visible = live;
+      st.hands.forEach((hd) => { hd.g.visible = live; });
+    };
+    /* qué borde exterior hay debajo del dedo: un asa, la franja de aire pegada
+       al costado o al techo, o la cara de fuera del propio tablero */
     st.edgeOf = (u, point) => {
       const p = propsRef.current.params;
-      const mk = (axis, sx) => (axis === "w"
-        ? { axis, sx, pos: [sx * (p.width / 2 + 60) / 1000, point.y - st.root.position.y, point.z], rot: 0 }
-        : { axis, sx: 1, pos: [point.x, (p.height + 60) / 1000, point.z], rot: Math.PI / 2 });
-      /* la franja de aire pegada al costado o al techo: el sitio fácil de agarrar */
-      if (u?.grp === "canto") return mk(u.axis, u.sx);
-      if (!u || u.grp !== "carcasa") return null;
-      /* y también la cara de fuera del propio tablero; por dentro no, ahí están los huecos */
+      if (u?.grp === "asa" || u?.grp === "canto") return { axis: u.axis, sx: u.sx };
+      if (!u || u.grp !== "carcasa" || !point) return null;
+      /* por dentro no: ahí están los huecos */
       const x = point.x * 1000, y = (point.y - st.root.position.y) * 1000, tol = 4;
       if (u.id === "lat_i" || u.id === "lat_d") {
         const sx = u.id === "lat_d" ? 1 : -1;
-        return Math.abs(x - sx * p.width / 2) > tol ? null : mk("w", sx);
+        return Math.abs(x - sx * p.width / 2) > tol ? null : { axis: "w", sx };
       }
-      if (u.id.startsWith("techo")) return Math.abs(y - p.height) > tol ? null : mk("h", 1);
+      if (u.id.startsWith("techo")) return Math.abs(y - p.height) > tol ? null : { axis: "h", sx: 1 };
       return null;
-    };
-    st.showArrow = (edge) => {
-      const a = st.arrow;
-      if (!edge || propsRef.current.photo || propsRef.current.exploded) { a.visible = false; return; }
-      a.position.set(edge.pos[0], edge.pos[1] + st.root.position.y, edge.pos[2]);
-      a.rotation.z = edge.rot;
-      a.visible = true;
     };
 
     st.stepCam = stepCam;
@@ -335,10 +386,14 @@ const Viewport = forwardRef(function Viewport(
     const pickAt = (e) => {
       setPtr(e);
       st.ray.setFromCamera(st.ptr, camera);
-      const all = st.ray.intersectObjects(st.meshes, false);
+      const all = st.ray.intersectObjects(st.frame?.visible ? st.meshes.concat(st.picks) : st.meshes, false);
       if (!all.length) return null;
       /* las bandas de estirar son aire pegado al mueble: solo cuentan si el
          rayo no toca ninguna pieza, para que nunca roben un hueco ni un frente */
+      /* un asa se dibuja por encima de todo, así que se coge siempre que se toca:
+         lo que se ve es lo que se agarra */
+      const asa = all.find((h) => h.object.userData?.grp === "asa");
+      if (asa) return asa;
       const hits = all.filter((h) => h.object.userData?.grp !== "canto");
       if (!hits.length) return all[0];
       const first = hits[0];
@@ -487,6 +542,8 @@ const Viewport = forwardRef(function Viewport(
       st.moved = 0;
       if (e.button === 1 || e.button === 2 || e.shiftKey || e.altKey) { st.mode = "pan"; return; }
       const hit = pickAt(e);
+      /* tocar en cualquier otro sitio apaga el contorno del borde */
+      if (!st.edgeOf(hit && hit.object.userData, hit && hit.point)) { st.edgePin = false; st.showEdge(false); }
       /* con un hueco elegido, arrastrar su frente, su barra o su tirador lo lleva a otro hueco */
       const sel = propsRef.current.selection, hu = hit && hit.object.userData;
       /* la barra no: arrastrarla cambia su altura (más abajo) */
@@ -533,7 +590,9 @@ const Viewport = forwardRef(function Viewport(
         st.drag = { edge: edge0, axis: "size", start: st.hitPt.clone(), off,
                     base: { width: p.width, height: p.height }, snap: deepCopy(p) };
         st.mode = "drag";
-        st.showArrow(edge0);
+        /* el borde queda encendido al soltar: así se puede volver a coger un asa */
+        st.edgePin = true;
+        st.showEdge(true);
         propsRef.current.onSelect?.(null);
         canvas.style.cursor = edge0.axis === "w" ? "ew-resize" : "ns-resize";
         return;
@@ -556,12 +615,12 @@ const Viewport = forwardRef(function Viewport(
     };
 
     const onMove = (e) => {
-      /* sin arrastrar nada: al pasar por un canto exterior sale la flecha de estirar */
+      /* sin arrastrar nada: al pasar por el borde exterior se enciende el contorno entero */
       if (!st.pointers.size && !propsRef.current.placing && !propsRef.current.photo) {
         const over = pickAt(e);
         const u = over?.object.userData;
         const edge = over ? st.edgeOf(u, over.point) : null;
-        st.showArrow(edge);
+        st.showEdge(!!edge || st.edgePin);
         canvas.style.cursor = edge ? (edge.axis === "w" ? "ew-resize" : "ns-resize")
           : u?.drag ? (u.drag === "x" ? "ew-resize" : "ns-resize") : "";
       }
@@ -640,10 +699,6 @@ const Viewport = forwardRef(function Viewport(
             width: Math.round(width / 10) * 10, height: Math.round(height / 10) * 10,
           });
           propsRef.current.onChange(next);
-          /* la flecha acompaña al canto mientras se estira */
-          st.showArrow(ed.axis === "w"
-            ? { ...ed, pos: [ed.sx * (next.width / 2 + 60) / 1000, ed.pos[1], ed.pos[2]] }
-            : { ...ed, pos: [ed.pos[0], (next.height + 60) / 1000, ed.pos[2]] });
           st.last = { x: e.clientX, y: e.clientY };
           return;
         }
@@ -793,7 +848,8 @@ const Viewport = forwardRef(function Viewport(
     canvas.addEventListener("wheel", onWheel, { passive: false });
     const onLeave = () => {
       if (!st.pointers.size) showDrop(null);
-      if (!st.drag) { st.showArrow(null); canvas.style.cursor = ""; }
+      /* el ratón se va del visor: el contorno solo se queda si lo dejaron tocado */
+      if (!st.drag) { st.showEdge(st.edgePin); canvas.style.cursor = ""; }
     };
     canvas.addEventListener("pointerleave", onLeave);
     canvas.addEventListener("gesturestart", onGestureStart);
@@ -815,8 +871,11 @@ const Viewport = forwardRef(function Viewport(
         camera.updateProjectionMatrix();
       }
       stepCam();
-      /* la flecha se ve siempre del mismo tamaño, estés cerca o lejos */
-      if (st.arrow?.visible) st.arrow.scale.setScalar(clamp(st.cam.r * 0.33, 0.6, 2.2));
+      /* el contorno y las asas siguen al mueble y a la cámara */
+      if (st.frame?.visible) {
+        if (propsRef.current.photo || propsRef.current.exploded || propsRef.current.placing) st.showEdge(false);
+        else st.layoutEdge();
+      }
       if (st.photoOn && st.ph) {
         const ph = st.ph, now = performance.now();
         const bw = renderer.domElement.width, bh = renderer.domElement.height;
