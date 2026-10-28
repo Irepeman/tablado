@@ -9,7 +9,7 @@
    ============================================================ */
 import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
-  drawersIn, drawerCount, isDoor, isRail, hasBox, HANDLES, build, railPos, railRange, setRailAt, doorKey,
+  drawersIn, drawerCount, isDoor, isRail, hasBox, HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -147,6 +147,36 @@ for (let run = 0; run < 400; run++) {
   n++;
   const ar = build(PRESETS.armario(normalize({}))).parts.filter((x) => x.hinge).map(doorKey);
   if (new Set(ar).size !== ar.length) fail("puertas", `claves de hoja repetidas: ${ar.join(" ")}`);
+}
+
+{
+  /* estirar por una esquina: lo de dentro se reparte igual que estaba */
+  const frac = (q) => q.columns.map((c) => c.shelves.map((v) => (v / (q.height - q.baseHeight - 2 * q.thickness)).toFixed(2)).join(","));
+  for (const k of PRESET_KEYS) {
+    const p = PRESETS[k](normalize({}));
+    for (const [w, h] of [[3000, 2400], [900, 1100], [p.width, 2600], [1600, p.height]]) {
+      n++;
+      const q = scaleTo(p, { width: w, height: h });
+      if (q.width !== w || q.height !== h) fail("estirar", `${k}: pedía ${w}×${h} y salió ${q.width}×${q.height}`);
+      if (q.columns.length !== p.columns.length) fail("estirar", `${k} ${w}×${h}: cambian las columnas (${p.columns.length} → ${q.columns.length})`);
+      const a = frac(p).join(" | "), b = frac(q).join(" | ");
+      if (a !== b) fail("estirar", `${k} ${w}×${h}: las baldas se descolocan · ${a} → ${b}`);
+      if (JSON.stringify(normalize(deepCopy(q)).columns) !== JSON.stringify(q.columns)) fail("estirar", `${k} ${w}×${h}: normalize lo vuelve a cambiar`);
+    }
+  }
+  /* los límites del taller mandan */
+  n++;
+  const lim = scaleTo(PRESETS.armario(normalize({})), { width: 99999, height: 1 });
+  if (lim.width !== 3200 || lim.height !== 400) fail("estirar", `fuera de rango: ${lim.width}×${lim.height}`);
+  /* una barra de colgar sube y baja con el mueble */
+  n++;
+  let ar = PRESETS.armario(normalize({}));
+  setRailAt(ar, ar.columns[0], 0, railRange(ar, ar.columns[0], 0)[0] + 100);
+  ar = normalize(ar);
+  const rel = railPos(ar, ar.columns[0], 0) / (ar.height - ar.baseHeight - 2 * ar.thickness);
+  const big = scaleTo(ar, { width: ar.width, height: 2500 });
+  const rel2 = railPos(big, big.columns[0], 0) / (big.height - big.baseHeight - 2 * big.thickness);
+  if (Math.abs(rel - rel2) > 0.02) fail("estirar", `la barra no sigue al mueble: ${rel.toFixed(2)} → ${rel2.toFixed(2)}`);
 }
 
 const total = [...fails.values()].reduce((a, v) => a + v.length, 0);

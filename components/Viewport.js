@@ -11,9 +11,10 @@
    ============================================================ */
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import * as THREE from "three";
-import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight, railPos, railRange, setRailAt, doorKey } from "@/lib/model";
+import { MATERIALS, build, clamp, deepCopy, legCount, cellAtHeight, railPos, railRange, setRailAt, doorKey, scaleTo } from "@/lib/model";
 import { woodSheet, plyEdge, panelGeometry, isWood } from "./wood";
 import { buildDecor, clearDecor, floorTexture } from "./decor";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -159,6 +160,10 @@ const Viewport = forwardRef(function Viewport(
       chromeMat: new THREE.MeshStandardMaterial({ color: 0xd9d9d6, roughness: 0.22, metalness: 1 }),
       railSelMat: new THREE.MeshStandardMaterial({ color: 0xc97a3c, roughness: 0.35, metalness: 0.4,
         emissive: new THREE.Color(0x8a3f12), emissiveIntensity: 0.3 }),
+      /* tiradores de esquina: para agrandar o encoger el mueble entero */
+      gripMat: new THREE.MeshStandardMaterial({ color: 0x2e5e45, roughness: 0.3, metalness: 0.1,
+        emissive: new THREE.Color(0x14301f), emissiveIntensity: 0.35 }),
+      grips: [],
       brassMat: new THREE.MeshStandardMaterial({ color: 0xc19a5b, roughness: 0.3, metalness: 1 }),
       aluMat: new THREE.MeshStandardMaterial({ color: 0xbfc2c3, roughness: 0.38, metalness: 1 }),
       recessMat: new THREE.MeshStandardMaterial({ color: 0x151513, roughness: 0.55, metalness: 0.4 }),
@@ -265,6 +270,13 @@ const Viewport = forwardRef(function Viewport(
     };
     st.stepCam = stepCam;
     st.clampTarget = clampTarget;
+    /* distancia mínima a la que un mueble de w×h×d cabe entero en el visor */
+    st.fitR = (w, h, d) => {
+      const rect = canvas.getBoundingClientRect();
+      const vf = (camera.fov * Math.PI) / 360;
+      const hf = Math.atan((Math.tan(vf) * rect.width) / Math.max(1, rect.height));
+      return clamp(Math.max((h / 2 + 0.12) / Math.tan(vf), (w / 2 + 0.12) / Math.tan(hf)) * 1.06 + d / 2, R_MIN, R_MAX);
+    };
 
     const setPtr = (e) => {
       const r = canvas.getBoundingClientRect();
@@ -285,7 +297,9 @@ const Viewport = forwardRef(function Viewport(
       if (!hits.length) return null;
       const first = hits[0];
       const solid = hits.find((h) => h.object.userData?.grp !== "hueco");
-      /* la barra de colgar es fina y está al fondo: si el rayo la toca, es que se apunta a ella */
+      /* la esquina y la barra son finas: si el rayo las toca, es que se apunta a ellas */
+      const grip = hits.find((h) => h.object.userData?.grp === "esquina");
+      if (grip) return grip;
       if (solid && solid.object.userData.grp === "barra") return solid;
       if (solid && solid.object.userData.drag && solid.distance - first.distance < 0.07) return solid;
       if (first.object.userData?.grp === "hueco") return first;
@@ -461,6 +475,19 @@ const Viewport = forwardRef(function Viewport(
         selectFrom(hu0);
         return;
       }
+      if (hu0 && hu0.grp === "esquina" && e.button === 0) {
+        /* la esquina estira el mueble entero: el plano de arrastre mira a la cámara */
+        const p = propsRef.current.params;
+        const n = camera.getWorldDirection(new THREE.Vector3()).negate();
+        st.dragPlane.setFromNormalAndCoplanarPoint(n, hit.point);
+        st.ray.ray.intersectPlane(st.dragPlane, st.hitPt);
+        st.drag = { u: hu0, axis: "corner", start: st.hitPt.clone(),
+                    base: { width: p.width, height: p.height }, snap: deepCopy(p) };
+        st.mode = "drag";
+        propsRef.current.onSelect?.(null);
+        canvas.style.cursor = "nwse-resize";
+        return;
+      }
       if (hit && hit.object.userData.drag && e.button === 0) {
         const u = hit.object.userData;
         const p = propsRef.current.params;
@@ -479,6 +506,12 @@ const Viewport = forwardRef(function Viewport(
     };
 
     const onMove = (e) => {
+      /* sin arrastrar nada: el cursor avisa de que una esquina se puede estirar */
+      if (!st.pointers.size && !propsRef.current.placing && !propsRef.current.photo) {
+        const over = pickAt(e);
+        canvas.style.cursor = over?.object.userData?.grp === "esquina" ? "nwse-resize"
+          : over?.object.userData?.drag ? (over.object.userData.drag === "x" ? "ew-resize" : "ns-resize") : "";
+      }
       /* colocando una pieza del catálogo: el hueco bajo el puntero se resalta */
       if (!st.pointers.size && propsRef.current.placing) {
         const tg = targetAt(e.clientX, e.clientY);
@@ -540,6 +573,23 @@ const Viewport = forwardRef(function Viewport(
         const p = deepCopy(propsRef.current.params);
         const t = p.thickness;
         const Hi = p.height - p.baseHeight - 2 * t;
+        if (st.drag.axis === "corner") {
+          const u = st.drag.u;
+          /* el mueble está centrado en x: la mitad del ancho es la distancia al eje */
+          const dx = (st.hitPt.x - st.drag.start.x) * 1000;
+          const width = st.drag.base.width + 2 * u.sx * dx;
+          let height = st.drag.base.height;
+          if (u.top) {
+            const dy = (st.hitPt.y - st.drag.start.y) * 1000;
+            height = st.drag.base.height + dy;
+          }
+          propsRef.current.onChange(scaleTo(propsRef.current.params, {
+            width: Math.round(width / 10) * 10,
+            height: Math.round(height / 10) * 10,
+          }));
+          st.last = { x: e.clientX, y: e.clientY };
+          return;
+        }
         if (st.drag.axis === "rail") {
           const d = (st.hitPt.y - st.drag.start.y) * 1000;
           const [a, z] = st.drag.range;
@@ -603,6 +653,14 @@ const Viewport = forwardRef(function Viewport(
       }
       if (st.mode === "drag" && st.drag) {
         if (st.moved > 4) propsRef.current.onCommit(st.drag.snap);
+        if (st.drag.axis === "corner") {
+          canvas.style.cursor = "";
+          /* el mueble ha cambiado de tamaño: se encuadra otra vez, sin girarlo */
+          const q = propsRef.current.params;
+          const lift = q.base === "flotante" ? 0.42 : 0;
+          st.cam.tTarget.set(0, lift + q.height / 2000, 0);
+          st.cam.tR = Math.max(st.cam.tR, st.fitR(q.width / 1000, q.height / 1000, q.depth / 1000));
+        }
         st.drag = null;
       } else if (st.mode === "orbit" && st.moved < 5 && e.type === "pointerup") {
         tapOn(pickAt(e));
@@ -697,6 +755,11 @@ const Viewport = forwardRef(function Viewport(
         camera.updateProjectionMatrix();
       }
       stepCam();
+      /* los tiradores de esquina se ven siempre del mismo tamaño, estés cerca o lejos */
+      if (st.grips.length) {
+        const k = clamp(0.026 * st.cam.r, 0.04, 0.12) / 0.032;
+        st.grips.forEach((g) => g.scale.setScalar(k));
+      }
       if (st.photoOn && st.ph) {
         const ph = st.ph, now = performance.now();
         const bw = renderer.domElement.width, bh = renderer.domElement.height;
@@ -1007,6 +1070,25 @@ const Viewport = forwardRef(function Viewport(
         st.root.add(leg);
         st.meshes.push(leg);
       });
+    }
+
+    /* ---------- tiradores de esquina ----------
+       Cuatro cubos en las esquinas de la cara de delante. Tirando de los de
+       arriba el mueble crece de ancho y de alto; los de abajo solo de ancho.
+       No se dibujan en el despiece ni en la foto: son herramienta, no mueble. */
+    st.grips = [];
+    if (!exploded && !st.photoOn) {
+      const gs = 0.032, z = (p.depth / 2 + 10) / 1000;
+      const xs = [[-1, "l"], [1, "r"]], ys = [[p.height / 1000, "t"], [(p.base === "flotante" ? 0 : p.baseHeight / 2) / 1000, "b"]];
+      xs.forEach(([sx, hx]) => ys.forEach(([y, hy]) => {
+        const g = new THREE.Mesh(new RoundedBoxGeometry(gs, gs, gs, 2, 0.006), st.gripMat);
+        g.position.set((sx * p.width / 2) / 1000, y, z);
+        g.userData = { grp: "esquina", corner: hy + hx, sx, top: hy === "t" };
+        g.castShadow = false;
+        st.root.add(g);
+        st.meshes.push(g);
+        st.grips.push(g);
+      }));
     }
 
     st.root.position.y = p.base === "flotante" ? 0.42 : 0;
