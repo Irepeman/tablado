@@ -30,6 +30,7 @@ import { tr, num, matName, matShort } from "@/lib/i18n";
 import { logMiss } from "@/lib/record";
 
 const LANG_KEY = "cutwise-lang";
+const PANES_KEY = "cutwise-paneles";      // qué laterales deja abiertos cada uno
 /* piezas que van DENTRO del mueble: al colocarlas, las puertas se abren para ver dónde caen */
 const INSIDE = ["shelf", "rail", "divider", "door+drawer", "tray"];
 const intro = (lang) => {
@@ -81,6 +82,8 @@ export default function Configurator() {
   const [toast, setToast] = useState("");
   const [selBox, setSelBox] = useState(null);
   const [tab, setTab] = useState("spec");
+  /* los dos laterales se pliegan: hay quien quiere el mueble solo, sin nada alrededor */
+  const [panes, setPanes] = useState({ left: true, right: true });
   const [photo, setPhoto] = useState(false);
   const [photoSamples, setPhotoSamples] = useState(0);
   const [openView, setOpenView] = useState(false);
@@ -137,6 +140,21 @@ export default function Configurator() {
     const t = setTimeout(() => { document.title = title; }, 400);
     return () => clearTimeout(t);
   }, [lang]);
+
+  /* los laterales que se dejaron plegados siguen plegados al volver */
+  useEffect(() => {
+    let raw = null;
+    try { raw = localStorage.getItem(PANES_KEY); } catch {}
+    if (raw === "l" || raw === "r" || raw === "none") {
+      setPanes({ left: raw === "l", right: raw === "r" });
+    }
+  }, []);
+  const togglePane = (side) => setPanes((q) => {
+    const next = { ...q, [side]: !q[side] };
+    const code = next.left && next.right ? "both" : next.left ? "l" : next.right ? "r" : "none";
+    try { localStorage.setItem(PANES_KEY, code); } catch {}
+    return next;
+  });
 
   useEffect(() => {
     let saved = null;
@@ -594,8 +612,8 @@ export default function Configurator() {
         </div>
       </header>
 
-      <div className="main">
-        <div className={"rail-wrap" + (tab === "chat" ? "" : " hide-sm")}>
+      <div className={"main" + (panes.left ? "" : " no-l") + (panes.right ? "" : " no-r")}>
+        <div className={"rail-wrap w-l" + (tab === "chat" ? "" : " hide-sm")} aria-hidden={!panes.left || undefined}>
           <Chat messages={messages} busy={busy} onSend={send} lang={lang}
                 onPhoto={(file, hint) => setPhotoFile({ file, hint })} />
         </div>
@@ -638,6 +656,14 @@ export default function Configurator() {
                 </div>
               )}
             </div>
+            <button className="glass railtog l" onClick={() => togglePane("left")}
+                    aria-expanded={panes.left}
+                    title={(panes.left ? L.paneHide : L.paneShow)(L.tabChat)}
+                    aria-label={(panes.left ? L.paneHide : L.paneShow)(L.tabChat)}>{panes.left ? "‹" : "›"}</button>
+            <button className="glass railtog r" onClick={() => togglePane("right")}
+                    aria-expanded={panes.right}
+                    title={(panes.right ? L.paneHide : L.paneShow)(L.tabSpec)}
+                    aria-label={(panes.right ? L.paneHide : L.paneShow)(L.tabSpec)}>{panes.right ? "›" : "‹"}</button>
             <div className="vp-tr">
               <button className="glass pill-btn parts-btn" aria-pressed={showParts} title={L.piecesTitle}
                       onClick={() => { setShowParts((v) => !v); setPlacing(null); }}>＋ {L.piecesBtn}</button>
@@ -678,7 +704,7 @@ export default function Configurator() {
           </div>
         </section>
 
-        <div className={"rail-wrap" + (tab === "spec" ? "" : " hide-sm")}>
+        <div className={"rail-wrap w-r" + (tab === "spec" ? "" : " hide-sm")} aria-hidden={!panes.right || undefined}>
           <SpecRail
             params={params} selection={selection} founder={founder} lang={lang}
             onEdit={onEdit} onCommitEdit={onCommitEdit}
@@ -689,9 +715,11 @@ export default function Configurator() {
           />
         </div>
 
+        {/* en móvil mandan las pestañas, y volver a tocar la abierta la cierra:
+            también aquí se puede dejar el mueble solo en la pantalla */}
         <div className="tabs">
-          <button aria-pressed={tab === "chat"} onClick={() => setTab("chat")}>{L.tabChat}</button>
-          <button aria-pressed={tab === "spec"} onClick={() => setTab("spec")}>{L.tabSpec}</button>
+          <button aria-pressed={tab === "chat"} onClick={() => setTab((t) => (t === "chat" ? null : "chat"))}>{L.tabChat}</button>
+          <button aria-pressed={tab === "spec"} onClick={() => setTab((t) => (t === "spec" ? null : "spec"))}>{L.tabSpec}</button>
         </div>
       </div>
 
