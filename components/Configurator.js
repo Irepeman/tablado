@@ -32,7 +32,7 @@ import { logMiss } from "@/lib/record";
 const LANG_KEY = "cutwise-lang";
 const PANES_KEY = "cutwise-paneles";      // qué laterales deja abiertos cada uno
 /* piezas que van DENTRO del mueble: al colocarlas, las puertas se abren para ver dónde caen */
-const INSIDE = ["shelf", "rail", "divider", "door+drawer", "tray"];
+const INSIDE = ["shelf", "rail", "divider", "door+drawer", "door+drawer2", "door+drawer3", "tray"];
 const intro = (lang) => {
   const L = tr(lang);
   return [{ role: "ai", text: L.intro }, { role: "sys", text: L.introSys }];
@@ -484,7 +484,8 @@ export default function Configurator() {
     setSelection({ k: "cell", col: to.col, cell: to.cell });
   };
 
-  const CELL_OPTIONS = ["open", "door", "drawer", "drawer2", "drawer3", "door+drawer", "tray", "rail", "rail+door"];
+  const CELL_OPTIONS = ["open", "door", "drawer", "drawer2", "drawer3",
+    "door+drawer", "door+drawer2", "door+drawer3", "tray", "rail", "rail+door"];
   const cellBox = () => {
     const c = params.columns[selection.col];
     if (!c) return null;

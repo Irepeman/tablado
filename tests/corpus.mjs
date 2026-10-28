@@ -227,6 +227,8 @@ es("tiradores negros", ({ a }) => a.handle === "bar" && a.material === "roble", 
 es("pomos negros", ({ a }) => a.handle === "knob" && a.material === "roble");
 es("cambia los tiradores", ans(/pomo/));
 es("un cajón interior en la segunda", ({ a }) => col(a, 1).cells.includes("door+drawer") && col(a, 0).drawers === 0);
+es("tres cajones interiores en la primera", ({ a }) => col(a, 0).cells.includes("door+drawer3"));
+es("dos cajones interiores", ({ a }) => a.columns.some((c) => c.cells.includes("door+drawer2")));
 es("bandeja extraíble para zapatos", ({ a }) => col(a, 0).cells.includes("tray") && a.depth === 320);
 es("zapatero extraíble en todas", ({ a }) => all(a, (c) => c.cells.includes("tray")));
 es("blanca y con tiradores de latón", ({ a }) => a.material === "melamina_blanca" && a.handle === "bar_brass");
@@ -246,6 +248,7 @@ en("knobs please", ({ a }) => a.handle === "knob");
 en("handleless, push to open", ({ a }) => a.handle === "push");
 en("recessed handles", ({ a }) => a.handle === "cup");
 en("an inner drawer in the second column", ({ a }) => col(a, 1).cells.includes("door+drawer"));
+en("three inner drawers in the first column", ({ a }) => col(a, 0).cells.includes("door+drawer3"));
 en("a pull-out shoe rack", ({ a }) => col(a, 0).cells.includes("tray"));
 en("change the handles", ans(/knob/));
 en("drawers in the bottom row", ({ a }) => all(a, (c) => nd(c.cells[0]) >= 1));

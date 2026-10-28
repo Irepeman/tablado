@@ -9,7 +9,8 @@
    ============================================================ */
 import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
-  drawersIn, drawerCount, isDoor, isRail, hasBox, HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo,
+  drawersIn, drawerCount, isDoor, isRail, hasBox, isInner, boxesIn, boxType, BOX_MIN, BOX_H,
+  HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -52,7 +53,7 @@ for (let run = 0; run < 400; run++) {
           : item === "door" ? (x) => isDoor(x)
           : item === "rail" ? (x) => isRail(x)
           : item === "tray" ? (x) => hasBox(x)
-          : item === "door+drawer" ? (x) => x === "door+drawer"
+          : item === "door+drawer" ? (x) => isInner(x)
           : drawersIn(item) ? (x) => x === item : null;
         /* la pieza tiene que estar en ese hueco (o, si se partió, en el de abajo) */
         if (want && !want(c.cells[cell])) fail("la pieza no queda donde se suelta", `${log.join(" · ")} · ${what} → ${c.cells.join(",")}`);
@@ -177,6 +178,51 @@ for (let run = 0; run < 400; run++) {
   const big = scaleTo(ar, { width: ar.width, height: 2500 });
   const rel2 = railPos(big, big.columns[0], 0) / (big.height - big.baseHeight - 2 * big.thickness);
   if (Math.abs(rel - rel2) > 0.02) fail("estirar", `la barra no sigue al mueble: ${rel.toFixed(2)} → ${rel2.toFixed(2)}`);
+}
+
+{
+  /* el bloque de cajones interiores: uno, dos o tres, y siempre detrás de la puerta */
+  for (const [type, want] of [["door+drawer", 1], ["door+drawer2", 2], ["door+drawer3", 3]]) {
+    n++;
+    let p = PRESETS.armario(normalize({}));
+    setCell(p, p.columns[0], 0, type, p.columns);
+    p = normalize(p);
+    const cell = p.columns[0].cells.findIndex(isInner);
+    if (cell < 0) { fail("cajón interior", `${type} no se pone`); continue; }
+    if (boxesIn(p.columns[0].cells[cell]) !== want) fail("cajón interior", `${type} se queda en ${p.columns[0].cells[cell]}`);
+    const g = build(p);
+    const fronts = g.parts.filter((x) => x.col === 0 && x.id.startsWith("cajoni_"));
+    if (fronts.length !== want) fail("cajón interior", `${type} dibuja ${fronts.length} frentes`);
+    /* los frentes no se montan unos sobre otros ni se salen del compartimento */
+    const ys = fronts.map((x) => [x.pos[1] - x.size[1] / 2, x.pos[1] + x.size[1] / 2]).sort((a, b) => a[0] - b[0]);
+    for (let k = 1; k < ys.length; k++) if (ys[k][0] < ys[k - 1][1]) fail("cajón interior", `${type}: dos frentes se pisan`);
+    /* y hay una puerta que los tapa */
+    const door = g.parts.find((x) => x.id.startsWith("puerta_0_") && x.cells && x.cells[0] <= cell && x.cells[1] >= cell);
+    if (!door) fail("cajón interior", `${type} se queda a la vista: sin puerta delante`);
+    else if (door.pos[1] - door.size[1] / 2 > ys[0][0] + 1 || door.pos[1] + door.size[1] / 2 < ys[ys.length - 1][1] - 1) {
+      fail("cajón interior", `${type}: la puerta no llega a taparlos`);
+    }
+    /* un par de guías por cajón */
+    if (g.parts.filter((x) => x.col === 0 && x.runner).length !== want) fail("cajón interior", `${type}: guías mal contadas`);
+  }
+  /* soltar otro cajón interior encima apila, y al tercero se planta */
+  n++;
+  let q = PRESETS.armario(normalize({}));
+  applyItem(q, "door+drawer", 0, 0);
+  const seq = [];
+  for (let k = 0; k < 4; k++) {
+    const r = applyItem(q, "door+drawer", 0, q.columns[0].cells.findIndex(isInner));
+    q = normalize(q);
+    seq.push(r.ok ? boxesIn(q.columns[0].cells.find(isInner)) : r.reason);
+  }
+  if (seq.join(",") !== "2,3,maxBox,maxBox") fail("cajón interior", `apilar da ${seq.join(",")}`);
+  /* un hueco que no da para tres deja los que quepan, no los borra */
+  n++;
+  const tight = normalize({ width: 900, height: 900, depth: 600, base: "zocalo", baseHeight: 80,
+                            columns: [{ width: 864, shelves: [], cells: ["door+drawer3"] }] });
+  const got = boxesIn(tight.columns[0].cells[0]);
+  if (!(got >= 1 && got <= 3) || !isInner(tight.columns[0].cells[0])) fail("cajón interior", `hueco justo: ${tight.columns[0].cells[0]}`);
+  if (got * BOX_MIN > tight.height - tight.baseHeight - 2 * tight.thickness) fail("cajón interior", `caben ${got} y no caben`);
 }
 
 const total = [...fails.values()].reduce((a, v) => a + v.length, 0);
