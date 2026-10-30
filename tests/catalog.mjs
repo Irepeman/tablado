@@ -11,6 +11,7 @@ import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
   drawersIn, drawerCount, isDoor, isRail, hasBox, isInner, boxesIn, boxType, BOX_MIN, BOX_H,
   HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell, cellBounds, BOX_MAX,
+  drawerBand, setDrawerH, evenDrawers, shareOf, mixOf, MIN_FRONT,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -290,6 +291,67 @@ for (let run = 0; run < 400; run++) {
     const got2 = boxesIn(r3.columns[0].cells.find(isInner));
     if (got2 !== want) fail("cajón interior", `el panel pone ${to} y salen ${got2}`);
   }
+}
+
+{
+  /* estirar UN cajón del bloque: los demás se reparten lo que queda */
+  const fronts = (p, col) => build(p).parts
+    .filter((x) => x.col === col && x.grp === "frente" && x.idx != null)
+    .sort((a, b) => a.idx - b.idx);
+  for (const [type, col, row] of [["drawer3", 0, 0], ["drawer2", 0, 0], ["door+drawer3", 2, 2]]) {
+    n++;
+    let p = normalize(scaleTo(PRESETS.estanteria(normalize({})), { width: 2400, height: 2000, depth: 320 }));
+    if (!canPlace(p, type, col, row, true).ok) { fail("cajón suelto", `${type} no cabe`); continue; }
+    applyItem(p, type, col, row, true);
+    p = normalize(p);
+    const c = p.columns[col], j = c.cells.findIndex((x) => drawerCount(x) > 1);
+    const b = drawerBand(p, c, j);
+    if (!b || b.n < 2) { fail("cajón suelto", `${type}: sin bloque que repartir`); continue; }
+    const was = fronts(p, col).map((x) => Math.round(x.size[1]));
+    const suma = (q) => q.reduce((a, v) => a + v, 0);
+    /* iguales de salida */
+    if (Math.max(...was) - Math.min(...was) > 1) fail("cajón suelto", `${type}: no salen iguales (${was.join(",")})`);
+    /* se estira el primero y el hueco NO cambia de alto */
+    setDrawerH(p, p.columns[col], j, 0, was[0] + 60);
+    p = normalize(p);
+    const now = fronts(p, col).map((x) => Math.round(x.size[1]));
+    if (now.length !== b.n) fail("cajón suelto", `${type}: ${now.length} frentes tras estirar`);
+    if (Math.abs(suma(now) - suma(was)) > 2) fail("cajón suelto", `${type}: el bloque cambia de alto (${suma(was)} -> ${suma(now)})`);
+    if (now[0] <= was[0]) fail("cajón suelto", `${type}: el elegido no crece (${was[0]} -> ${now[0]})`);
+    if (now.some((v) => v < MIN_FRONT - 1)) fail("cajón suelto", `${type}: frente de ${Math.min(...now)} mm`);
+    /* ni se pisan ni se salen */
+    const ys = fronts(p, col).map((x) => [x.pos[1] - x.size[1] / 2, x.pos[1] + x.size[1] / 2]);
+    for (let k = 1; k < ys.length; k++) if (ys[k][0] < ys[k - 1][1] - 0.5) fail("cajón suelto", `${type}: dos frentes se pisan`);
+    /* el tope: pedir de más deja a los demás en el mínimo, no por debajo */
+    setDrawerH(p, p.columns[col], j, 0, 9999);
+    p = normalize(p);
+    const max = fronts(p, col).map((x) => Math.round(x.size[1]));
+    if (max.slice(1).some((v) => v < MIN_FRONT - 1)) fail("cajón suelto", `${type}: el tope deja frentes de ${Math.min(...max.slice(1))} mm`);
+    /* el reparto aguanta un cambio de medidas del mueble */
+    const prop = fronts(p, col).map((x) => x.size[1] / suma(max));
+    p = normalize(scaleTo(p, { width: 2400, height: 2300, depth: 320 }));
+    const big = fronts(p, col);
+    if (big.length === prop.length) {
+      const s2 = suma(big.map((x) => x.size[1]));
+      big.forEach((x, k) => { if (Math.abs(x.size[1] / s2 - prop[k]) > 0.03) fail("cajón suelto", `${type}: el reparto se pierde al cambiar el alto`); });
+    }
+    /* «todos iguales» lo devuelve a su sitio */
+    evenDrawers(p.columns[col], p.columns[col].cells.findIndex((x) => drawerCount(x) > 1));
+    p = normalize(p);
+    const back = fronts(p, col).map((x) => Math.round(x.size[1]));
+    if (Math.max(...back) - Math.min(...back) > 1) fail("cajón suelto", `${type}: «todos iguales» no iguala (${back.join(",")})`);
+  }
+  /* cambiar el número de cajones borra el reparto a mano */
+  n++;
+  let q2 = normalize(scaleTo(PRESETS.estanteria(normalize({})), { width: 2400, height: 2000, depth: 320 }));
+  applyItem(q2, "drawer3", 0, 0, true);
+  q2 = normalize(q2);
+  setDrawerH(q2, q2.columns[0], 0, 0, 200);
+  q2 = normalize(q2);
+  if (mixOf(q2.columns[0])[0] == null) fail("cajón suelto", "el reparto no se guarda");
+  setCell(q2, q2.columns[0], 0, "drawer2", q2.columns);
+  q2 = normalize(q2);
+  if (mixOf(q2.columns[0])[0] != null) fail("cajón suelto", "el reparto sobrevive a cambiar el número de cajones");
 }
 
 const total = [...fails.values()].reduce((a, v) => a + v.length, 0);

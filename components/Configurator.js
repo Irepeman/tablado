@@ -23,6 +23,7 @@ import {
   DEFAULT, normalize, build, validate,
   maxSpan, deepCopy, clamp, setCell, isRail, cellBounds, cellAtHeight, PRESETS,
   canPlace, applyItem, moveCell, isDoor, setOwnDoor, railPos, railRange, setRailAt, doorKey,
+  drawerBand, setDrawerH, evenDrawers, shareOf, mixOf,
 } from "@/lib/model";
 import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
@@ -187,6 +188,10 @@ export default function Configurator() {
     if (selection.k === "shelf") return c?.shelves[selection.shelf] != null;
     if (selection.k === "cell") return c?.cells[selection.cell] != null;
     if (selection.k === "rail") return isRail(c?.cells[selection.cell]);
+    if (selection.k === "drawer") {
+      const b = c && drawerBand(params, c, selection.cell);
+      return !!b && b.n > 1 && selection.idx < b.n;
+    }
     if (selection.k === "div") return selection.div < params.columns.length - 1;
     return false;
   })();
@@ -208,7 +213,8 @@ export default function Configurator() {
     const tick = () => {
       const geo = vp.current?.geo();
       const part = selection.k === "cell" ? vp.current?.cellPart(selection.col, selection.cell) : geo?.parts.find((x) =>
-        selection.k === "rail" ? x.grp === "barra" && x.col === selection.col && x.cell === selection.cell
+        selection.k === "drawer" ? x.grp === "frente" && x.col === selection.col && x.cell === selection.cell && x.idx === selection.idx
+        : selection.k === "rail" ? x.grp === "barra" && x.col === selection.col && x.cell === selection.cell
         : selection.k === "shelf"
           ? x.grp === "balda" && x.col === selection.col && x.shelf === selection.shelf
           : x.grp === "divisor" && x.div === selection.div);
@@ -447,6 +453,46 @@ export default function Configurator() {
             setSelection(null); onCommitEdit(n);
           }}>{L.remove}</button>
         </div>
+      </>
+    );
+  };
+
+  /* Un cajón suelto del bloque: se cambia su alto y los demás se reparten el resto */
+  const drawerBox = () => {
+    const c = params.columns[selection.col];
+    const j = selection.cell, k = selection.idx;
+    const b = c && drawerBand(params, c, j);
+    if (!b || b.n < 2) return null;
+    const hs = shareOf(c, j, b.n).map((q) => Math.round(b.front(q)));
+    const top = Math.round(b.total - (b.n - 1) * b.min);
+    const set = (mm) => {
+      if (!Number.isFinite(mm) || Math.round(clamp(mm, b.min, top)) === hs[k]) return;
+      const n = deepCopy(params);
+      setDrawerH(n, n.columns[selection.col], j, k, mm);
+      onCommitEdit(n);
+    };
+    const even = mixOf(c)[j] == null;
+    return (
+      <>
+        <h4>{L.drawerTitle(k + 1, b.n, selection.col + 1)}</h4>
+        <div className="selrow">
+          <label>{L.drawerH}</label>
+          <input className="numin mono" defaultValue={hs[k]} key={hs[k]}
+                 onBlur={(e) => set(Number(e.target.value))}
+                 onKeyDown={(e) => e.key === "Enter" && set(Number(e.target.value))} />
+          <span style={{ fontSize: 11, color: "var(--ink-3)" }}>mm</span>
+          <div className="stepper">
+            <button disabled={hs[k] <= b.min} onClick={() => set(hs[k] - 20)}>−</button>
+            <button disabled={hs[k] >= top} onClick={() => set(hs[k] + 20)}>+</button>
+          </div>
+        </div>
+        <p className="cellnote">{L.drawerRest(b.n - 1)} · {hs.map((v, i) => (i === k ? `[${v}]` : v)).join(" · ")} mm</p>
+        <button className="rowbtn" disabled={even}
+                onClick={() => { const n = deepCopy(params); evenDrawers(n.columns[selection.col], j); onCommitEdit(n); }}>
+          {L.evenAll}
+        </button>
+        <button className="rowbtn" style={{ marginTop: 4 }}
+                onClick={() => setSelection({ k: "cell", col: selection.col, cell: j })}>{L.wholeCell}</button>
       </>
     );
   };
@@ -699,7 +745,8 @@ export default function Configurator() {
             {selValid && selBox && (
               <div ref={selRef} className={"glass selbox on" + (selection.k === "cell" ? " wide" : "") + (selBox.dock ? " dock" : "")}
                    style={selBox.dock ? undefined : { left: selBox.x, top: selBox.y }}>
-                {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox() : selection.k === "rail" ? railBox() : divBox()}
+                {selection.k === "shelf" ? shelfBox() : selection.k === "cell" ? cellBox()
+                  : selection.k === "drawer" ? drawerBox() : selection.k === "rail" ? railBox() : divBox()}
               </div>
             )}
           </div>

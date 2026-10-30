@@ -503,6 +503,9 @@ const Viewport = forwardRef(function Viewport(
         const j = clamp(cellAtHeight(p, p.columns[u.col], ym), u.cells[0], u.cells[1]);
         onSelect({ k: "cell", col: u.col, cell: j });
       }
+      /* un cajón del bloque se elige él solo: tocas ese y los demás se adaptan */
+      else if (u && u.grp === "frente" && u.idx != null && u.of > 1)
+        onSelect({ k: "drawer", col: u.col, cell: u.cell, idx: u.idx });
       else if (u && u.col != null && u.cell != null) onSelect({ k: "cell", col: u.col, cell: u.cell });
       else onSelect(null);
     };
@@ -1100,7 +1103,10 @@ const Viewport = forwardRef(function Viewport(
         (selection.k === "div" && part.grp === "divisor" && part.div === selection.div) ||
         /* hueco elegido: se resalta su frente (la puerta o los cajones) */
         (selection.k === "cell" && part.grp === "frente" && part.col === selection.col &&
-         (part.cells ? selection.cell >= part.cells[0] && selection.cell <= part.cells[1] : part.cell === selection.cell)));
+         (part.cells ? selection.cell >= part.cells[0] && selection.cell <= part.cells[1] : part.cell === selection.cell)) ||
+        /* un solo cajón del bloque: se resalta ese y nada más */
+        (selection.k === "drawer" && part.grp === "frente" && part.col === selection.col &&
+         part.cell === selection.cell && part.idx === selection.idx));
       const g = panelGeometry(part.size, part.id, !isBack && p.material === "abedul");
       const m = new THREE.Mesh(g, isBack ? backMat() : [faceMat(isSel), edgeMat(isSel)]);
       let [px, py, pz] = part.pos;
