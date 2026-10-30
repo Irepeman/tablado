@@ -10,7 +10,7 @@
 import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
   drawersIn, drawerCount, isDoor, isRail, hasBox, isInner, boxesIn, boxType, BOX_MIN, BOX_H,
-  HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell, cellBounds,
+  HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell, cellBounds, BOX_MAX,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -249,6 +249,32 @@ for (let run = 0; run < 400; run++) {
         if (air < -1) fail("cajón interior", `H${H} n${nb} hueco${j}: los cajones se salen por arriba`);
       }
     }
+  }
+
+  /* la balda de encima no se mueve si el hueco ya da cajones de un alto normal:
+     moverla por moverlo descuadra la línea con las columnas de al lado */
+  for (const [row, nb] of [[0, 2], [2, 2], [1, 2]]) {
+    n++;
+    let p = normalize(scaleTo(PRESETS.estanteria(normalize({})), { width: 2400, height: 2000, depth: 320 }));
+    const before = JSON.stringify(p.columns[2].shelves);
+    if (!canPlace(p, boxType(nb), 2, row, true).ok) { fail("cajón interior", `fila ${row}: no cabe`); continue; }
+    applyItem(p, boxType(nb), 2, row, true);
+    p = normalize(p);
+    if (JSON.stringify(p.columns[2].shelves) !== before) {
+      fail("cajón interior", `fila ${row}: la balda se mueve sin falta (${before} -> ${JSON.stringify(p.columns[2].shelves)})`);
+    }
+  }
+
+  /* si hay que moverla, los frentes tienen que salir de un alto de cajón */
+  for (const [row, nb] of [[0, 1], [0, 3], [2, 1], [2, 3]]) {
+    n++;
+    let p = normalize(scaleTo(PRESETS.estanteria(normalize({})), { width: 2400, height: 2000, depth: 320 }));
+    if (!canPlace(p, boxType(nb), 2, row, true).ok) continue;
+    applyItem(p, boxType(nb), 2, row, true);
+    p = normalize(p);
+    const fr = build(p).parts.filter((x) => x.col === 2 && x.id.startsWith("cajoni_"));
+    const bad = fr.find((x) => x.size[1] < BOX_MIN - 1 || x.size[1] > BOX_MAX + 1);
+    if (bad) fail("cajón interior", `fila ${row} con ${nb}: frente de ${Math.round(bad.size[1])} mm`);
   }
 
   /* el panel PONE el número que se pulsa: de tres se puede bajar a uno */
