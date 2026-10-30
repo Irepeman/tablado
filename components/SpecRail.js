@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, MIN_FRONT, PRESET_KEYS, HANDLES,
-  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build, isRail, cellClear,
+  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build, isRail, cellClear, minSize, clamp,
 } from "@/lib/model";
 
 /* Dibujo de cada tipo de mueble, en línea: se lee de un vistazo */
@@ -179,17 +179,23 @@ export default function SpecRail({
               {L.colsShelves(p.columns.length, p.columns.reduce((a, c) => a + c.shelves.length, 0))}
             </em>
           </h3>
+          {/* el tope de abajo lo marcan las columnas y las baldas que ya tiene: encogerlo
+              más las borraba, y volver a estirarlo no las devolvía */}
           {[[L.width, "width", 400, 3200], [L.heightL, "height", 400, 2600], [L.depth, "depth", 180, 600]]
-            .map(([label, key, min, max]) => (
+            .map(([label, key, min, max]) => {
+              const lim = minSize(p);
+              const lo = Math.max(min, Math.min(lim[key] ?? min, p[key]));
+              return (
               <div className="f" key={key}>
                 <label htmlFor={key}>{label}</label>
-                <input id={key} type="range" min={min} max={max} step={10} value={p[key]}
+                <input id={key} type="range" min={lo} max={max} step={10} value={p[key]}
                        onPointerDown={grab} onKeyDown={grab}
-                       onChange={(e) => live((x) => { x[key] = Number(e.target.value); })}
+                       onChange={(e) => live((x) => { x[key] = clamp(Number(e.target.value), lo, max); })}
                        onPointerUp={release} onKeyUp={release} onBlur={release} />
-                <NumField value={p[key]} onCommit={(v) => edit((x) => { x[key] = v; })} />
+                <NumField value={p[key]} onCommit={(v) => edit((x) => { x[key] = clamp(v, lo, max); })} />
               </div>
-            ))}
+              );
+            })}
         </section>
 
         <section className="sec">

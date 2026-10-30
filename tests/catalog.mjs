@@ -11,7 +11,7 @@ import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
   drawersIn, drawerCount, isDoor, isRail, hasBox, isInner, boxesIn, boxType, BOX_MIN, BOX_H,
   HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell, cellBounds, BOX_MAX,
-  drawerBand, setDrawerH, evenDrawers, shareOf, mixOf, MIN_FRONT,
+  drawerBand, setDrawerH, evenDrawers, shareOf, mixOf, MIN_FRONT, minSize,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -166,10 +166,32 @@ for (let run = 0; run < 400; run++) {
       if (JSON.stringify(normalize(deepCopy(q)).columns) !== JSON.stringify(q.columns)) fail("estirar", `${k} ${w}×${h}: normalize lo vuelve a cambiar`);
     }
   }
-  /* los límites del taller mandan */
+  /* los límites del taller mandan por arriba; por abajo manda lo que el mueble
+     ya lleva dentro: encogerlo no puede borrar columnas ni baldas */
   n++;
-  const lim = scaleTo(PRESETS.armario(normalize({})), { width: 99999, height: 1 });
-  if (lim.width !== 3200 || lim.height !== 400) fail("estirar", `fuera de rango: ${lim.width}×${lim.height}`);
+  const arm = PRESETS.armario(normalize({}));
+  const lim = scaleTo(arm, { width: 99999, height: 1 });
+  const want = minSize(arm);
+  if (lim.width !== 3200 || lim.height !== want.height) fail("estirar", `fuera de rango: ${lim.width}×${lim.height}, se esperaba 3200×${want.height}`);
+  for (const k of PRESET_KEYS) {
+    n++;
+    const a = PRESETS[k](normalize({}));
+    /* encoger a lo bestia y volver a estirar deja el mueble como estaba */
+    const small = scaleTo(scaleTo(a, { width: 1, height: 1 }), { width: 1, height: 1 });
+    if (small.columns.length !== a.columns.length) {
+      fail("estirar", `${k}: encoger borra columnas (${a.columns.length} → ${small.columns.length})`);
+    }
+    const shA = a.columns.map((c) => c.shelves.length).join(","), shS = small.columns.map((c) => c.shelves.length).join(",");
+    if (shA !== shS) fail("estirar", `${k}: encoger borra baldas (${shA} → ${shS})`);
+    const back = scaleTo(small, { width: a.width, height: a.height });
+    if (back.width !== a.width || back.height !== a.height) fail("estirar", `${k}: no vuelve a su tamaño (${back.width}×${back.height})`);
+    const colsA = a.columns.map((c) => c.shelves.length).join(",");
+    const colsB = back.columns.map((c) => c.shelves.length).join(",");
+    if (colsA !== colsB) fail("estirar", `${k}: el viaje de ida y vuelta cambia las baldas · ${colsA} → ${colsB}`);
+    back.columns.forEach((c, i) => {
+      if (Math.abs(c.width - a.columns[i].width) > 4) fail("estirar", `${k}: la columna ${i + 1} vuelve con otro ancho (${a.columns[i].width} → ${c.width})`);
+    });
+  }
   /* una barra de colgar sube y baja con el mueble */
   n++;
   let ar = PRESETS.armario(normalize({}));
