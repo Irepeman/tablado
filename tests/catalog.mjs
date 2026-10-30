@@ -10,7 +10,7 @@
 import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
   drawersIn, drawerCount, isDoor, isRail, hasBox, isInner, boxesIn, boxType, BOX_MIN, BOX_H,
-  HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell,
+  HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell, cellBounds,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -223,6 +223,47 @@ for (let run = 0; run < 400; run++) {
   const got = boxesIn(tight.columns[0].cells[0]);
   if (!(got >= 1 && got <= 3) || !isInner(tight.columns[0].cells[0])) fail("cajón interior", `hueco justo: ${tight.columns[0].cells[0]}`);
   if (got * BOX_MIN > tight.height - tight.baseHeight - 2 * tight.thickness) fail("cajón interior", `caben ${got} y no caben`);
+
+  /* el bloque LLENA su hueco: nada de un cajón suelto con un palmo de aire encima.
+     Se prueba en muebles de todas las alturas y en todos los huecos de la columna. */
+  for (const H of [900, 1400, 2000, 2200]) {
+    for (const nb of [1, 2, 3]) {
+      for (let j = 0; j < 4; j++) {
+        n++;
+        let p = normalize(scaleTo(PRESETS.estanteria(normalize({})), { width: 2400, height: H, depth: 420 }));
+        const c = p.columns[0];
+        if (j >= c.cells.length) continue;
+        const type = boxType(nb);
+        if (!canPlace(p, type, 0, j, true).ok) continue;
+        applyItem(p, type, 0, j, true);
+        p = normalize(p);
+        const cc = p.columns[0], cell = cc.cells.findIndex(isInner);
+        if (cell < 0) { fail("cajón interior", `H${H} n${nb} hueco${j}: no se pone`); continue; }
+        const g = build(p), lat = g.parts.find((x) => x.id === "lat_i");
+        const y0 = lat.pos[1] - lat.size[1] / 2 + p.thickness;   // suelo interior, no canto del lateral
+        const b = cellBounds(p, cc);
+        const fronts = g.parts.filter((x) => x.col === 0 && x.id.startsWith("cajoni_"));
+        const top = Math.max(...fronts.map((x) => x.pos[1] + x.size[1] / 2)) - y0;
+        const air = b[cell + 1] - top;
+        if (air > 45) fail("cajón interior", `H${H} n${nb} hueco${j}: ${Math.round(air)} mm de aire encima`);
+        if (air < -1) fail("cajón interior", `H${H} n${nb} hueco${j}: los cajones se salen por arriba`);
+      }
+    }
+  }
+
+  /* el panel PONE el número que se pulsa: de tres se puede bajar a uno */
+  n++;
+  let r3 = PRESETS.armario(normalize({}));
+  applyItem(r3, "door+drawer3", 0, 0, true);
+  for (const [to, want] of [["door+drawer", 1], ["door+drawer2", 2], ["door+drawer3", 3], ["door+drawer", 1]]) {
+    const at = r3.columns[0].cells.findIndex(isInner);
+    const chk = canPlace(r3, to, 0, at, true);
+    if (!chk.ok) { fail("cajón interior", `el panel no deja poner ${to}: ${chk.reason}`); continue; }
+    applyItem(r3, to, 0, at, true);
+    r3 = normalize(r3);
+    const got2 = boxesIn(r3.columns[0].cells.find(isInner));
+    if (got2 !== want) fail("cajón interior", `el panel pone ${to} y salen ${got2}`);
+  }
 }
 
 const total = [...fails.values()].reduce((a, v) => a + v.length, 0);

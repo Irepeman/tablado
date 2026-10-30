@@ -497,7 +497,7 @@ export default function Configurator() {
         setCell(n, n.columns[selection.col], j, type, n.columns);
         if (!wasDoor) setOwnDoor(n.columns[selection.col], j);
         if (n.depth < 500) n.depth = 580;                       // para colgar hacen falta 500 mm
-      } else if (!applyItem(n, type, selection.col, j).ok) return;
+      } else if (!applyItem(n, type, selection.col, j, true).ok) return;   // el panel pone, no apila
       onCommitEdit(n);
     };
     const wholeRow = () => {
@@ -507,7 +507,7 @@ export default function Configurator() {
       n.columns.forEach((cc, i) => {
         if (i === selection.col) return;
         const jj = cellAtHeight(n, cc, mid);
-        if (!canPlace(n, type, i, jj).ok) return;                // donde no cabe, se deja
+        if (!canPlace(n, type, i, jj, true).ok) return;          // donde no cabe, se deja
         const wasDoor = isDoor(cc.cells[jj]);
         setCell(n, cc, jj, type, n.columns);
         if (isDoor(type) && !wasDoor) setOwnDoor(cc, jj);
@@ -521,7 +521,7 @@ export default function Configurator() {
         <h4>{L.cellTitle(selection.col + 1, j + 1)}</h4>
         <div className="cellgrid">
           {CELL_OPTIONS.map((ty) => {
-            const chk = canPlace(params, ty, selection.col, j);
+            const chk = canPlace(params, ty, selection.col, j, true);
             return (
               <button key={ty} className="mini" aria-pressed={c.cells[j] === ty} disabled={!chk.ok}
                       title={chk.ok ? L.itemsHelp[ty] : why(chk)} onClick={() => pick(ty)}>
