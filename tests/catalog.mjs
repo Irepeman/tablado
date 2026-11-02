@@ -11,7 +11,7 @@ import {
   DEFAULT, normalize, deepCopy, PRESETS, PRESET_KEYS, CATALOG, canPlace, applyItem, moveCell,
   drawersIn, drawerCount, isDoor, isRail, hasBox, isInner, boxesIn, boxType, BOX_MIN, BOX_H,
   HANDLES, build, railPos, railRange, setRailAt, doorKey, scaleTo, setCell, cellBounds, BOX_MAX,
-  drawerBand, setDrawerH, evenDrawers, shareOf, mixOf, MIN_FRONT, minSize,
+  drawerBand, setDrawerH, evenDrawers, shareOf, mixOf, MIN_FRONT, minSize, maxSize,
 } from "../lib/model.js";
 
 let seed = 915;
@@ -171,8 +171,16 @@ for (let run = 0; run < 400; run++) {
   n++;
   const arm = PRESETS.armario(normalize({}));
   const lim = scaleTo(arm, { width: 99999, height: 1 });
-  const want = minSize(arm);
-  if (lim.width !== 3200 || lim.height !== want.height) fail("estirar", `fuera de rango: ${lim.width}×${lim.height}, se esperaba 3200×${want.height}`);
+  const lo = minSize(arm), hi = maxSize(arm);
+  if (lim.width !== hi.width || lim.height !== lo.height) {
+    fail("estirar", `fuera de rango: ${lim.width}×${lim.height}, se esperaba ${hi.width}×${lo.height}`);
+  }
+  /* y ninguna columna pasa de la luz que aguanta una balda: si pasara,
+     normalize() la partiría en dos y el mueble ganaría columnas solo */
+  n++;
+  if (scaleTo(arm, { width: 99999 }).columns.length !== arm.columns.length) {
+    fail("estirar", "estirar a tope parte columnas");
+  }
   for (const k of PRESET_KEYS) {
     n++;
     const a = PRESETS[k](normalize({}));

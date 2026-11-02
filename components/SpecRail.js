@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, MIN_FRONT, PRESET_KEYS, HANDLES,
-  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build, isRail, cellClear, minSize, clamp,
+  maxSpan, validate, addColumn, redistribute, setShelfCount, setDrawers, deepCopy, build, isRail, cellClear, minSize, maxSize, clamp,
 } from "@/lib/model";
 
 /* Dibujo de cada tipo de mueble, en línea: se lee de un vistazo */
@@ -183,16 +183,17 @@ export default function SpecRail({
               más las borraba, y volver a estirarlo no las devolvía */}
           {[[L.width, "width", 400, 3200], [L.heightL, "height", 400, 2600], [L.depth, "depth", 180, 600]]
             .map(([label, key, min, max]) => {
-              const lim = minSize(p);
+              const lim = minSize(p), top = maxSize(p);
               const lo = Math.max(min, Math.min(lim[key] ?? min, p[key]));
+              const hi = Math.min(max, Math.max(top[key] ?? max, p[key]));
               return (
               <div className="f" key={key}>
                 <label htmlFor={key}>{label}</label>
-                <input id={key} type="range" min={lo} max={max} step={10} value={p[key]}
+                <input id={key} type="range" min={lo} max={hi} step={10} value={p[key]}
                        onPointerDown={grab} onKeyDown={grab}
-                       onChange={(e) => live((x) => { x[key] = clamp(Number(e.target.value), lo, max); })}
+                       onChange={(e) => live((x) => { x[key] = clamp(Number(e.target.value), lo, hi); })}
                        onPointerUp={release} onKeyUp={release} onBlur={release} />
-                <NumField value={p[key]} onCommit={(v) => edit((x) => { x[key] = clamp(v, lo, max); })} />
+                <NumField value={p[key]} onCommit={(v) => edit((x) => { x[key] = clamp(v, lo, hi); })} />
               </div>
               );
             })}
