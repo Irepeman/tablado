@@ -21,7 +21,10 @@ function PresetIcon({ k }) {
 }
 import { cutlist, nest, quote, PRICE } from "@/lib/pricing";
 import { tr, num, money, matShort } from "@/lib/i18n";
-import { reservations, misses, reservationsCsv, missesCsv, clearAll } from "@/lib/record";
+import { reservations, misses, reservationsCsv, missesCsv, clearAll, forgetMiss } from "@/lib/record";
+import { localRules, approve, forget, asVocabSource, validRule, rewrite } from "@/lib/learn";
+import { parseIntent } from "@/lib/intent";
+import { parseIntentEN } from "@/lib/intent-en";
 
 /* Campo numérico con borrador propio: se escribe libremente y el valor solo
    se aplica al pulsar Intro o salir del campo (Esc cancela). Antes, cada
@@ -111,6 +114,103 @@ function RecordPanel({ L }) {
         <button onClick={() => { clearAll(); refresh(); }}>{L.recordClear}</button>
       </div>
       <p className="catalog-note">{L.recordNote}</p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------
+   EL BUCLE QUE APRENDE (modo fundador)
+   La cola: las frases que el chat no resolvió y las que el cliente
+   deshizo al momento. De cada una se puede sacar UNA palabra, que se
+   traduce a otra que el motor ya conoce. La aprueba una persona, y
+   además tiene que arreglar la frase que falló; si no, no se guarda.
+   Las palabras que no venían de un ataque: esas el chat las aparta
+   antes, y nunca llegan hasta aquí.
+   ------------------------------------------------------------ */
+function LearnPanel({ L, params, lang }) {
+  const [queue, setQueue] = useState([]);
+  const [learned, setLearned] = useState([]);
+  const [draft, setDraft] = useState({});
+  const [err, setErr] = useState({});
+  const [copied, setCopied] = useState(false);
+  const refresh = () => {
+    setQueue(misses().filter((m) => m.kind === "none" || m.kind === "undone"));
+    setLearned(localRules());
+  };
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 2000);
+    return () => clearInterval(t);
+  }, []);
+
+  /* la condición de la máquina se comprueba contra el motor de verdad */
+  const parse = (t) => {
+    const r = lang === "en" ? parseIntentEN(t, params, {}) : parseIntent(t, params, {});
+    return r && !r.ask && !r.action ? r : null;
+  };
+  const key = (m) => m.at + m.text;
+  /* lo que haría esa palabra, antes de aprobarla: la máquina solo sabe decir
+     si la frase pasa a entenderse, no si significa lo que el cliente quería.
+     Eso lo mira una persona, y para mirarlo tiene que verlo. */
+  const preview = (m) => {
+    const d = draft[key(m)] || {};
+    const v = d.from && d.to ? validRule(d.from, d.to) : null;
+    if (!v) return null;
+    const r = parse(rewrite(m.text, [v]).text);
+    return r ? r.changes.join(", ") : null;
+  };
+  const set = (m, k, v) => setDraft((d) => ({ ...d, [key(m)]: { ...d[key(m)], [k]: v } }));
+
+  const onApprove = (m) => {
+    const d = draft[key(m)] || {};
+    const res = approve({ phrase: m.text, from: d.from, to: d.to, why: m.text }, parse);
+    if (!res.ok) {
+      setErr((e) => ({ ...e, [key(m)]: res.reason === "palabra" ? L.learnBadWord : L.learnNoFix }));
+      return;
+    }
+    forgetMiss(m.text);
+    setErr((e) => ({ ...e, [key(m)]: null }));
+    refresh();
+  };
+  const onDrop = (m) => { forgetMiss(m.text); refresh(); };
+  const copy = () => {
+    try { navigator.clipboard.writeText(asVocabSource(learned)); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* sin permiso */ }
+  };
+
+  return (
+    <div className="founder on learn">
+      <h5>{L.learnTitle}</h5>
+      <div className="fr"><span>{L.learnQueue(queue.length)}</span><span>{L.learnRules(learned.length)}</span></div>
+      {!queue.length && <p className="catalog-note">{L.learnNone}</p>}
+      {queue.slice(0, 6).map((m) => (
+        <div className="rec learn-row" key={key(m)}>
+          <span className="q">“{m.text}”</span>
+          {m.kind === "undone" && <small>{L.learnUndone}</small>}
+          <div className="learn-in">
+            <input value={(draft[key(m)] || {}).from || ""} placeholder={L.learnFrom}
+                   onChange={(e) => set(m, "from", e.target.value)} />
+            <span aria-hidden="true">→</span>
+            <input value={(draft[key(m)] || {}).to || ""} placeholder={L.learnTo}
+                   onChange={(e) => set(m, "to", e.target.value)} />
+          </div>
+          {preview(m) && <small className="would">{L.learnWould(preview(m))}</small>}
+          <div className="cta-sub">
+            <button onClick={() => onApprove(m)}>{L.learnApprove}</button>
+            <button onClick={() => onDrop(m)}>{L.learnDrop}</button>
+          </div>
+          {err[key(m)] && <small className="bad">{err[key(m)]}</small>}
+        </div>
+      ))}
+      {learned.map((r) => (
+        <div className="rec learn-rule" key={r.from}>
+          <b>{r.from}</b> → {r.to}
+          <button onClick={() => { forget(r.from); refresh(); }}>{L.learnForget}</button>
+        </div>
+      ))}
+      {!!learned.length && (
+        <div className="cta-sub"><button onClick={copy}>{copied ? L.learnCopied : L.learnExport}</button></div>
+      )}
+      <p className="catalog-note">{L.learnNote}</p>
     </div>
   );
 }
@@ -406,6 +506,7 @@ export default function SpecRail({
         </div>
 
         {founder && <RecordPanel L={L} />}
+        {founder && <LearnPanel L={L} params={p} lang={lang} />}
 
         {founder && (
           <div className="founder on">

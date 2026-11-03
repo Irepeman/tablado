@@ -80,6 +80,8 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 | `components/wood.js` | 313 | Procedural wood: grain at physical scale, per panel, with real edges |
 | `components/{Catalog,Chat,PhotoImport}.js` | 414 | Parts catalogue, chat panel, photo import dialog |
 | `lib/record.js` | 108 | The record: reservations, unresolved phrases, CSV export. The only data the product keeps |
+| `lib/learn.js` | 126 | The learning loop: what the chat may learn from people, and the limit on it |
+| `lib/vocab.js` | 24 | The approved words. One line per word a customer used and the engine did not know |
 | `components/Reserve.js` | 96 | The reserve form: the gap's measurements, how they were taken, and one contact |
 | `app/api/design/route.js` | 163 | Optional server copilot. Returns parameters validated with zod, then normalized |
 
@@ -108,6 +110,35 @@ unresolved message.
 photo with a homography from the four corners, find the lines that cross the whole piece, classify
 each compartment by brightness, texture and edges, detect handles, drop the plinth and the cornice,
 then map the result onto the engine's columns and compartments. The photo never leaves the device.
+
+### What the chat learns from people, and what it may never learn
+
+A phrase the chat cannot resolve is written to the record. So is a phrase it *did* resolve and the
+customer undid within twenty seconds — the only signal we get for the failure that nobody reports,
+where the app understood something else and did it confidently. A phrase carrying an instruction
+inside it never reaches the queue: the guardrail files it as an attack, so an attacker cannot write
+our roadmap.
+
+From that queue, one person reviews each phrase and may teach the product **one word**: the word the
+customer used, mapped to a word the engine already knows (`entrepaño` → `balda`). The word is
+substituted before the engine reads the sentence, once, and everything after that happens exactly as
+it always did — the same rules, the same limits, the same price. The customer is told: the answer
+says which word it read the sentence with.
+
+Three limits, in code, not in intention:
+
+- **A learned entry is one word, letters only** (`lib/learn.js`, `isWord`). It cannot carry a number,
+  a sentence or an instruction, so the loop cannot learn a measurement or an order.
+- **A person approves every word.** Nothing is learned automatically, ever.
+- **The machine adds its own condition on top of ours**: the word is only saved if, with it, the
+  phrase that failed is now understood. And before approving, the panel shows what the sentence
+  *would* do with that word, because the machine can only tell that something happens — whether it is
+  the right thing is the judgement the human is there for.
+
+The red line: **the loop learns words, never rules.** No learned entry can change what is buildable,
+what a piece costs, or what `normalize` and `validate` allow. If customers keep asking for a 2.4 m
+shelf with no support, the product must keep saying no, however many of them ask. That is the one
+thing it must never learn.
 
 ---
 
@@ -155,7 +186,7 @@ least certain part of the product.
 
 ## 7. Tests
 
-`npm test` runs nine files and takes about two seconds.
+`npm test` runs ten files and takes about two seconds.
 
 | File | What it proves |
 | --- | --- |
@@ -167,6 +198,7 @@ least certain part of the product.
 | `tests/record.mjs` | 16 checks on the record: what a reservation must carry, and that a CSV survives quotes and missing fields |
 | `tests/audit.mjs` | 178 pieces end to end: no NaN, nothing outside the carcass, every price and cutting plan a real number |
 | `tests/evals.mjs` | The 15 cases of the session 8 error analysis: 10 real requests and 5 attacks, plus the three understanding bugs they exposed |
+| `tests/learn.mjs` | 41 checks on the learning loop, most of them on its limit: that a number, a sentence or an instruction cannot be learned, and that a word is only saved if it fixes the phrase that failed |
 
 The suite is the gate: if anything fails, nothing is deployed. It is also what made parallel AI review
 possible — three agents could edit the same codebase because the tests graded them.
@@ -227,6 +259,8 @@ What we keep, and why each field earns its place:
 | Timestamp and whether they committed | The only honest measure of whether anyone wants this | |
 | Later: the workshop, the quote, the real cost, the lead time, and any piece remade | Turns our estimated prices into measured ones | Added when the first order is cut |
 | Every phrase the chat could not parse, with the design at that moment | Fixes the product where it actually breaks | No contact details attached |
+| Every phrase the customer undid within twenty seconds of it working | The only signal for a wrong answer given confidently; nobody reports those | Same row as above, marked `undone` |
+| The words a person approved, with the phrase each came from | So a word learned in one browser can be committed and travel to everyone | `lib/vocab.js` once committed; one word per line, nothing else |
 
 Where it lives: in the browser of whoever writes it. There is no server and no account, so nobody
 can read anyone else's, and a reservation reaches us only when its owner sends it. Founder mode
@@ -275,3 +309,6 @@ a pre-order or nothing at all.
 | 3 Nov | "and doors on the others" means the columns not already named | It was putting the doors on the one column the sentence had excluded |
 | 3 Nov | The chat refuses text with an instruction inside it | An email pasted by a customer in good faith was enough to resize the piece. It now changes nothing and asks the person |
 | 3 Nov | The 15 cases became `tests/evals.mjs` | An eval that does not run on every deploy stops being true within a week |
+| 4 Nov | The product can learn one word at a time, approved by a person | Our own probe found real Spanish words the engine did not know — `entrepaño`, `anaquel`, `gaveta`. Those are vocabulary, not design, and vocabulary is the only thing it is safe to learn |
+| 4 Nov | An undo within twenty seconds of a chat change is recorded as a rejection | It is the only signal for the failure found on 3 November: understanding something else and doing it with complete confidence. Nobody writes to complain about that one |
+| 4 Nov | A learned entry can never be a number, a sentence or a rule | If the loop could learn a rule, enough customers asking for a 2.4 m unsupported shelf would eventually get one. The limit is in `isWord`, not in our good intentions |

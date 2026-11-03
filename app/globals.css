@@ -419,3 +419,20 @@ table.cut .r{text-align:right}
 .founder.record .rec{border-top:1px solid var(--line);padding:6px 0;font-size:12px}
 .founder.record .rec small{display:block;color:var(--ink-3);font-size:11px;margin-top:2px}
 .founder.record .rec.miss{font-style:italic}
+
+/* el bucle que aprende: la cola de revisión del modo fundador */
+.founder.learn .rec{border-top:1px solid var(--line);padding:7px 0;font-size:12px}
+.founder.learn .rec .q{display:block;font-style:italic}
+.founder.learn .rec small{display:block;color:var(--ink-3);font-size:11px;margin-top:2px}
+.founder.learn .rec small.bad{color:#9b3b26}
+.learn-in{display:flex;align-items:center;gap:5px;margin-top:5px}
+.learn-in input{flex:1;min-width:0;border:1px solid var(--line-2);border-radius:var(--radius);
+  background:transparent;color:var(--ink);font:inherit;font-size:11.5px;padding:3px 6px}
+.learn-in input:focus{outline:none;border-color:var(--ink-3)}
+.learn-in span{color:var(--ink-3)}
+.founder.learn .learn-rule{display:flex;align-items:center;gap:6px;font-size:11.5px}
+.founder.learn .learn-rule b{font-weight:600}
+.founder.learn .learn-rule button{margin-left:auto;border:1px solid var(--line-2);border-radius:var(--radius);
+  background:transparent;color:var(--ink-3);font:inherit;font-size:11px;padding:2px 7px;cursor:pointer}
+.founder.learn .learn-rule button:hover{border-color:var(--ink-3);color:var(--ink)}
+.founder.learn .rec small.would{color:var(--ink-2)}

@@ -29,6 +29,7 @@ import { parseIntent, fallback } from "@/lib/intent";
 import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
 import { tr, num, matName, matShort } from "@/lib/i18n";
 import { logMiss } from "@/lib/record";
+import { rules as learnedRules, rewrite as applyLearned } from "@/lib/learn";
 
 const LANG_KEY = "cutwise-lang";
 const PANES_KEY = "cutwise-paneles";      // qué laterales deja abiertos cada uno
@@ -105,6 +106,15 @@ export default function Configurator() {
   const [copilotOn, setCopilotOn] = useState(null);
 
   const history = useRef([]);
+  /* la última frase que SÍ cambió el mueble: si la deshace enseguida,
+     es que la entendimos mal con toda la seguridad del mundo */
+  const lastChat = useRef(null);
+  /* el cliente no se queja: deshace y sigue. Esa es la única pista. */
+  const noteUndo = (lg = "es") => {
+    const last = lastChat.current;
+    if (last && Date.now() - last.at < 20000) logMiss(last.text, params, lg, "undone");
+    lastChat.current = null;
+  };
   /* null = sin comprobar · false = este despliegue no tiene copiloto.
      En cuanto se sabe, se deja de gastar un viaje al servidor. */
   const copilot = useRef(null);
@@ -254,7 +264,18 @@ export default function Configurator() {
     const t0 = performance.now();
 
     const ctx = convo.current;
-    const res = en ? parseIntentEN(msg, params, ctx) : parseIntent(msg, params, ctx);
+    const read = (t) => (en ? parseIntentEN(t, params, ctx) : parseIntent(t, params, ctx));
+    let res = read(msg);
+    /* lo que nos enseñaron: si el motor no ha sabido, se cambian las palabras
+       aprobadas por las que conoce y se vuelve a leer la frase, una sola vez */
+    let readAs = null;
+    if (!res) {
+      const l = applyLearned(msg, learnedRules());
+      if (l.used.length) {
+        const r2 = read(l.text);
+        if (r2 && !r2.ask) { res = r2; readAs = l.used; }
+      }
+    }
     /* órdenes sobre el diseño entero: siempre reversibles con «deshaz» */
     if (res?.action === "reset") {
       convo.current = {};
@@ -267,6 +288,7 @@ export default function Configurator() {
     if (res?.action === "undo") {
       const prev = history.current.pop();
       if (!prev) { say({ role: "ai", text: T.nothingToUndo }); return; }
+      noteUndo(lang);
       setParams(normalize(prev));
       setSelection(null);
       say({ role: "ai", text: T.undone });
@@ -299,6 +321,10 @@ export default function Configurator() {
       const aftDr = after.columns.reduce((acc, c) => acc + c.drawers, 0);
       if (aftDr < reqDr) bits.push(T.drawersAdjusted(aftDr));
       if (warn) bits.push(T.watch + warn.d.replace(/^./, (c) => c.toLowerCase()));
+      /* si ha hecho falta una palabra aprendida, se dice: el cliente tiene
+         derecho a ver con qué ha leído su frase */
+      if (readAs) bits.push(T.readAs(readAs.map((u) => `«${u.from}» = «${u.to}»`).join(", ")));
+      lastChat.current = { text: msg, at: Date.now() };
       const ms = (performance.now() - t0).toFixed(1);
       say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after, lang), suggest: res.suggest || undefined,
             src: (en ? ms : ms.replace(".", ",")) + " ms" });
@@ -349,6 +375,7 @@ export default function Configurator() {
   const undo = () => {
     const prev = history.current.pop();
     if (!prev) return flash(L.undoEmpty);
+    noteUndo(lang);
     setParams(normalize(prev));
     setSelection(null);
   };
