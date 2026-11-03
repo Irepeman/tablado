@@ -273,8 +273,10 @@ export default function Configurator() {
       return;
     }
     if (res?.ask) {
-      /* ha contestado pero no ha cambiado nada: también es una pista de lo que falta */
-      logMiss(msg, params, lang, "ask");
+      /* ha contestado pero no ha cambiado nada: también es una pista de lo que falta.
+         Un texto con una orden dentro se apunta como ataque, no como frase pendiente:
+         si no, el registro nos pediría implementarlo. */
+      logMiss(msg, params, lang, res.blocked || "ask");
       say({ role: "ai", text: res.ask, suggest: res.suggest });
       return;
     }

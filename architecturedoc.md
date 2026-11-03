@@ -97,7 +97,10 @@ by hand that the engine would refuse.
 **Chat, with no model and no cost.** `lib/intent.js` parses Spanish with regular expressions and a
 small amount of context memory, and returns a parameter patch plus an explanation of what it changed.
 It costs nothing per message and answers instantly. When it does not understand, it says what it can
-do. If an API key is configured, unresolved messages go to the server model instead, which returns
+do. When the message carries an instruction inside it — a pasted email or product sheet that says
+"ignore the measurements above" or "note to the system" — the chat changes nothing, says what it saw,
+and asks the person for the measurement; the phrase is filed in the record as an attack, not as a
+feature we still owe. If an API key is configured, unresolved messages go to the server model instead, which returns
 parameters (never geometry) validated by zod. Without a key, the client stops asking after the first
 unresolved message.
 
@@ -152,16 +155,18 @@ least certain part of the product.
 
 ## 7. Tests
 
-`npm test` runs seven files and takes about two seconds.
+`npm test` runs nine files and takes about two seconds.
 
 | File | What it proves |
 | --- | --- |
-| `tests/qa.mjs` | 857,084 checks: nothing overlaps, nothing escapes the carcass, every piece fits a sheet, the cut list is complete, `normalize` is idempotent |
-| `tests/catalog.mjs` | 5,608 random catalogue operations: the part lands where it was dropped, other columns do not change |
+| `tests/qa.mjs` | 872,897 checks: nothing overlaps, nothing escapes the carcass, every piece fits a sheet, the cut list is complete, `normalize` is idempotent |
+| `tests/catalog.mjs` | 5,706 random catalogue operations: the part lands where it was dropped, other columns do not change |
 | `tests/photo.mjs` | 40 synthetic photos, including perspective and visible side panels |
 | `tests/chat.mjs` · `chat-en.mjs` | 329 phrases written the way customers write them |
-| `tests/corpus.mjs` | 226 cases that must never regress |
+| `tests/corpus.mjs` | 229 cases that must never regress |
 | `tests/record.mjs` | 16 checks on the record: what a reservation must carry, and that a CSV survives quotes and missing fields |
+| `tests/audit.mjs` | 178 pieces end to end: no NaN, nothing outside the carcass, every price and cutting plan a real number |
+| `tests/evals.mjs` | The 15 cases of the session 8 error analysis: 10 real requests and 5 attacks, plus the three understanding bugs they exposed |
 
 The suite is the gate: if anything fails, nothing is deployed. It is also what made parallel AI review
 possible — three agents could edit the same codebase because the tests graded them.
@@ -190,6 +195,11 @@ API as a hard dependency, because the product has to work when we cannot pay.
 - **Rectangular pieces only.** No sloped ceilings or spaces under stairs, although both appear in our
   own problem statement.
 - **The chat is rules, not a model.** Free and instant, and it fails on phrasing we did not anticipate.
+  The error analysis of 3 November showed how it fails: not by saying "I don't understand", which is
+  harmless, but by understanding something else and doing it with full confidence. One case still does
+  this — "take out the middle columns and put a single 2.40 m shelf across" becomes three columns and
+  an extra shelf, reported as if it had complied. The fix is for the chat to name the measurement it
+  did not use, and it is not written yet.
 - **We keep as little as possible.** No accounts and no saved designs: the only things the product
   stores are the reservations someone leaves and the phrases the chat could not resolve, and both
   live in that person's own browser. It is enough to learn from the first customers and not enough
@@ -259,3 +269,9 @@ a pre-order or nothing at all.
 | 13 Oct | Hackathon: shipped the conversational design path and scrapped the rest | We tried several ways for a customer to shape a piece; only one had to survive, and talking to it beat every menu we tried |
 | 25 Oct | Renamed this file `architecturedoc.md`, added "Data we keep" | The course names the file, and the record needed somewhere to be written down |
 | 25 Oct | The record ships: reservations, unresolved phrases, CSV in founder mode | A design that dies on the screen teaches us nothing; now it becomes a lead and a list of what to fix |
+| 3 Nov | Error analysis on 15 cases, step by step | Every failure we found sat in step 1, understanding. Steps 2, 3 and 4 made no mistakes of their own |
+| 3 Nov | `1.800 mm` now reads as 1800, not as 2 | The Spanish thousands separator was parsed as a decimal. Any customer writing their measurement the normal way got a 400 mm piece |
+| 3 Nov | `cada 30 cm` is a pitch, not "every column" | "shelves every 30 cm in the second column" re-cut all four columns and the answer never said so |
+| 3 Nov | "and doors on the others" means the columns not already named | It was putting the doors on the one column the sentence had excluded |
+| 3 Nov | The chat refuses text with an instruction inside it | An email pasted by a customer in good faith was enough to resize the piece. It now changes nothing and asks the person |
+| 3 Nov | The 15 cases became `tests/evals.mjs` | An eval that does not run on every deploy stops being true within a week |
