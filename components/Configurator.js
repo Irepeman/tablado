@@ -25,11 +25,11 @@ import {
   canPlace, applyItem, moveCell, isDoor, setOwnDoor, railPos, railRange, setRailAt, doorKey,
   drawerBand, setDrawerH, evenDrawers, shareOf, mixOf,
 } from "@/lib/model";
-import { parseIntent, fallback } from "@/lib/intent";
-import { parseIntentEN, fallbackEN } from "@/lib/intent-en";
+import { fallback } from "@/lib/intent";
+import { fallbackEN } from "@/lib/intent-en";
+import { readWith, replyText } from "@/lib/answer";
 import { tr, num, matName, matShort } from "@/lib/i18n";
 import { logMiss } from "@/lib/record";
-import { rules as learnedRules, rewrite as applyLearned } from "@/lib/learn";
 
 const LANG_KEY = "cutwise-lang";
 const PANES_KEY = "cutwise-paneles";      // qué laterales deja abiertos cada uno
@@ -263,19 +263,9 @@ export default function Configurator() {
     const before = deepCopy(params);
     const t0 = performance.now();
 
-    const ctx = convo.current;
-    const read = (t) => (en ? parseIntentEN(t, params, ctx) : parseIntent(t, params, ctx));
-    let res = read(msg);
-    /* lo que nos enseñaron: si el motor no ha sabido, se cambian las palabras
-       aprobadas por las que conoce y se vuelve a leer la frase, una sola vez */
-    let readAs = null;
-    if (!res) {
-      const l = applyLearned(msg, learnedRules());
-      if (l.used.length) {
-        const r2 = read(l.text);
-        if (r2 && !r2.ask) { res = r2; readAs = l.used; }
-      }
-    }
+    /* leer la frase, y si el motor no sabe, probar una vez con las palabras
+       aprobadas (lib/answer.js, el mismo camino que el banco de pruebas) */
+    const { res, readAs } = readWith(msg, params, convo.current, lang);
     /* órdenes sobre el diseño entero: siempre reversibles con «deshaz» */
     if (res?.action === "reset") {
       convo.current = {};
@@ -308,25 +298,11 @@ export default function Configurator() {
       history.current.push(before);
       setParams(after);
       setSelection(null);
-      const warn = validate(after, build(after, lang), lang).find((f) => f.lvl === "warn");
-      const bits = [res.changes.join(", ").replace(/^./, (c) => c.toUpperCase()) + "."];
-      if (res.notes.length) bits.push(res.notes.join("; ") + ".");
-      // Si normalize() corrigió lo pedido, se dice: el mensaje no puede contradecir el resultado.
-      const req = res.params;
-      if (req.columns.length !== after.columns.length) bits.push(T.colsAdjusted(after.columns.length));
-      for (const [k, lo, hi] of [["width", 400, 3200], ["height", 400, 2600], ["depth", 180, 600]]) {
-        if (Math.abs(Math.round(req[k]) - after[k]) > 10) bits.push(T.dimAdjusted(T.dimNames[k], num(lo, lang), num(hi, lang), num(after[k], lang)));
-      }
-      const reqDr = req.columns.reduce((acc, c) => acc + (c.drawers || 0), 0);
-      const aftDr = after.columns.reduce((acc, c) => acc + c.drawers, 0);
-      if (aftDr < reqDr) bits.push(T.drawersAdjusted(aftDr));
-      if (warn) bits.push(T.watch + warn.d.replace(/^./, (c) => c.toLowerCase()));
-      /* si ha hecho falta una palabra aprendida, se dice: el cliente tiene
-         derecho a ver con qué ha leído su frase */
-      if (readAs) bits.push(T.readAs(readAs.map((u) => `«${u.from}» = «${u.to}»`).join(", ")));
+      /* el texto sale de lib/answer.js, el mismo que juzga el banco de pruebas:
+         lo que lee el cliente y lo que juzgamos no pueden ser dos cosas distintas */
       lastChat.current = { text: msg, at: Date.now() };
       const ms = (performance.now() - t0).toFixed(1);
-      say({ role: "ai", text: bits.join(" "), chips: diffChips(before, after, lang), suggest: res.suggest || undefined,
+      say({ role: "ai", text: replyText(res, after, readAs, lang), chips: diffChips(before, after, lang), suggest: res.suggest || undefined,
             src: (en ? ms : ms.replace(".", ",")) + " ms" });
       return;
     }
