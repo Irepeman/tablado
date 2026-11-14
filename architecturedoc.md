@@ -73,8 +73,10 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 | `lib/intent-en.js` | 422 | English in, Spanish engine, English out |
 | `lib/photo.js` | 564 | Photo → furniture: homography, line detection, compartment classification |
 | `lib/i18n.js` | 314 | Every user-visible string, ES and EN |
+| `lib/answer.js` | 101 | The reply: what the customer reads and what the piece did, in one place, so the chat and the test bench use the same words |
+| `lib/judge.js` | 125 | The code judge: the four rules about an answer that a count can check, run on every `npm test` |
 | `components/Viewport.js` | 1,173 | three.js scene, picking, dragging, two-finger rotation, photo mode |
-| `components/Configurator.js` | 732 | Application state, history, chat wiring, catalogue placement |
+| `components/Configurator.js` | 830 | Application state, history, chat wiring, catalogue placement |
 | `components/SpecRail.js` | 372 | Dimensions, material, columns, cut list, price, manufacturing check |
 | `components/decor.js` | 363 | Books, clothes, plants and a TV, for photo mode only. Never in the cut list |
 | `components/wood.js` | 313 | Procedural wood: grain at physical scale, per panel, with real edges |
@@ -85,7 +87,7 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 | `components/Reserve.js` | 96 | The reserve form: the gap's measurements, how they were taken, and one contact |
 | `app/api/design/route.js` | 163 | Optional server copilot. Returns parameters validated with zod, then normalized |
 
-Total application code: about 7,300 lines, plus 1,600 lines of tests.
+Total application code: about 8,500 lines, plus 2,200 lines of tests.
 
 ---
 
@@ -140,6 +142,28 @@ what a piece costs, or what `normalize` and `validate` allow. If customers keep 
 shelf with no support, the product must keep saying no, however many of them ask. That is the one
 thing it must never learn.
 
+### How the product is judged, and which rule is code
+
+The answer the customer reads is written in one place (`lib/answer.js`), and the chat and the test
+bench call the same function, so what we judge is the answer itself, word for word, and not a
+reconstruction of it. `answer()` returns two things on purpose: `said`, the text, and `did`, what
+happened to the piece. A judge has to be able to look at both, because an answer can read perfectly
+and still have left the piece wrong.
+
+Five rules say what a good answer is: it does what the sentence asks and nothing else; it says where
+it touched; it never contradicts the piece; it names what it could not do; and a text with an
+instruction inside it changes nothing and is named as such. The red line is that no answer may accept
+a piece that cannot be built, or hand a customer the cost or the margin.
+
+Four of the five need no one to read them, so they are code (`lib/judge.js`) and they run on every
+`npm test`. What is left for the AI judge is the two that have to be read: whether only what was
+asked was done, and whether what was not done is named. The prompt that does that is `judgeprompt.md`,
+all three versions of it, with what each one caught.
+
+The division is not a tidy one, and the numbers say so: of the four failures the product really had on
+3 November, the code judge sees two. `tests/judge.mjs` asserts exactly that, because a code rule that
+never fires is decoration, not a check.
+
 ---
 
 **And one way out: the reservation.** Any design can become a reservation: the gap's measurements,
@@ -186,7 +210,7 @@ least certain part of the product.
 
 ## 7. Tests
 
-`npm test` runs ten files and takes about two seconds.
+`npm test` runs eleven files and takes about two seconds.
 
 | File | What it proves |
 | --- | --- |
@@ -198,6 +222,7 @@ least certain part of the product.
 | `tests/record.mjs` | 16 checks on the record: what a reservation must carry, and that a CSV survives quotes and missing fields |
 | `tests/audit.mjs` | 178 pieces end to end: no NaN, nothing outside the carcass, every price and cutting plan a real number |
 | `tests/evals.mjs` | The 15 cases of the session 8 error analysis: 10 real requests and 5 attacks, plus the three understanding bugs they exposed |
+| `tests/judge.mjs` | 19 judged cases: the fifteen of the session-8 error analysis as the product answers them today, plus four answers it really gave on 3 November. Checks that every case has a verdict and a reusable reason, that no answer today breaks a code rule, and that the four old ones break exactly the rules we said |
 | `tests/learn.mjs` | 41 checks on the learning loop, most of them on its limit: that a number, a sentence or an instruction cannot be learned, and that a word is only saved if it fixes the phrase that failed |
 
 The suite is the gate: if anything fails, nothing is deployed. It is also what made parallel AI review
@@ -312,3 +337,6 @@ a pre-order or nothing at all.
 | 4 Nov | The product can learn one word at a time, approved by a person | Our own probe found real Spanish words the engine did not know — `entrepaño`, `anaquel`, `gaveta`. Those are vocabulary, not design, and vocabulary is the only thing it is safe to learn |
 | 4 Nov | An undo within twenty seconds of a chat change is recorded as a rejection | It is the only signal for the failure found on 3 November: understanding something else and doing it with complete confidence. Nobody writes to complain about that one |
 | 4 Nov | A learned entry can never be a number, a sentence or a rule | If the loop could learn a rule, enough customers asking for a 2.4 m unsupported shelf would eventually get one. The limit is in `isWord`, not in our good intentions |
+| 14 Nov | The chat's reply moved out of the component into `lib/answer.js` | It only existed in a browser, so it could not be tested or judged. Now the product and the test bench say the same words |
+| 14 Nov | Four of the five rules for a good answer are code, not prompt | They can be checked with a count, so they should cost nothing and never have a bad day. Only the two that need reading go to the AI judge |
+| 14 Nov | The eval set keeps four answers from before the fixes, verbatim | A judge tested only on answers that pass proves nothing. The four failures of 3 November are the only real ones we have |
