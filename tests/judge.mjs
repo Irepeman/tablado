@@ -133,7 +133,8 @@ if (process.argv.includes("--sheet")) {
     const r = codeVerdict(c);
     return [c.n, c.type, c.req, c.said, did(c), c.v, c.why, r.verdict === "PASS" ? "limpio" : r.why];
   });
-  console.log([cols.map(cell).join(";"), ...rows.map((r) => r.map(cell).join(";"))].join("\n"));
+  /* el BOM es para que Excel abra las tildes bien */
+  console.log("\ufeff" + [cols.map(cell).join(";"), ...rows.map((r) => r.map(cell).join(";"))].join("\n"));
   process.exit(0);
 }
 
