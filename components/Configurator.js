@@ -28,6 +28,7 @@ import {
 import { fallback } from "@/lib/intent";
 import { fallbackEN } from "@/lib/intent-en";
 import { readWith, replyText } from "@/lib/answer";
+import { hardware, byGroup } from "@/lib/hardware";
 import { tr, num, matName, matShort } from "@/lib/i18n";
 import { logMiss } from "@/lib/record";
 
@@ -356,10 +357,23 @@ export default function Configurator() {
     setSelection(null);
   };
 
+  /* Lo que se descarga es lo que se manda al taller: tableros, ferretería y
+     taladros. Con el despiece solo, nadie puede montar el mueble. */
   const downloadCsv = (rows, q) => {
+    const hw = hardware(params, build(params, lang), lang);
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
+      L.csvCutTitle,
       L.csvHead,
       ...rows.map((r) => `${r.label};${r.qty};${r.L};${r.W};${r.t};${L.csvEdges[r.edges] ?? "0"}`),
+      "",
+      L.csvHwTitle,
+      L.csvHwHead,
+      ...byGroup(hw).flatMap((s2) => s2.lines.map((l) =>
+        [s2.title, l.name, l.qty, l.unit, l.note].map(esc).join(";"))),
+      "",
+      L.csvNotesTitle,
+      ...hw.notes.map((x) => esc(x)),
       "",
       `${L.csvMat};${matName(params.material, lang)} ${params.thickness} mm`,
       `${L.csvSheets};${q.nSheets}`,

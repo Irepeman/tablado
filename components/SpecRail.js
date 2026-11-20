@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { woodSwatchURL } from "./wood";
 import {
   MATERIALS, MATKEYS, THICKNESSES, SHEET, MIN_FRONT, PRESET_KEYS, HANDLES,
@@ -20,6 +20,7 @@ function PresetIcon({ k }) {
   return <svg viewBox="0 0 48 40" width="42" height="35" aria-hidden="true" className="picon">{g[k]}</svg>;
 }
 import { cutlist, nest, quote, PRICE } from "@/lib/pricing";
+import { hardware, byGroup } from "@/lib/hardware";
 import { tr, num, money, matShort } from "@/lib/i18n";
 import { reservations, misses, reservationsCsv, missesCsv, clearAll, forgetMiss } from "@/lib/record";
 import { localRules, approve, forget, asVocabSource, validRule, rewrite } from "@/lib/learn";
@@ -232,7 +233,7 @@ export default function SpecRail({
                 abedul: woodSwatchURL("abedul") });
   }, []);
 
-  const { rows, nested, q, flags, span } = useMemo(() => {
+  const { rows, nested, q, flags, span, hw } = useMemo(() => {
     const geo = build(p, lang);
     const rows = cutlist(geo);
     const nested = nest(rows);
@@ -241,6 +242,7 @@ export default function SpecRail({
       q: quote(p, geo, nested),
       flags: validate(p, geo, lang),
       span: maxSpan(p.material, t),
+      hw: hardware(p, geo, lang),
     };
   }, [p, t, lang]);
 
@@ -434,7 +436,7 @@ export default function SpecRail({
               [L.st.weight, `${Math.round(q.weight)}`, L.units.kg],
               [L.st.edge, q.edgeML.toFixed(1), L.units.m],
               [L.st.span, n(span), L.units.mm],
-              [L.st.hw, `${q.hw.minifix + q.hw.pins + q.hw.hinges + q.hw.runners * 2 + q.hw.rails * 3}`, L.units.ud],
+              [L.st.hw, `${hw.pieces}`, L.units.ud],
               [L.st.lead, "12–16", L.units.days],
             ].map(([k, v, u]) => (
               <div className="stat" key={k}>
@@ -463,6 +465,36 @@ export default function SpecRail({
               </tbody>
             </table>
           </div>
+        </section>
+
+        {/* Un despiece solo son tableros cortados: sin esto el taller no puede
+            montar nada. Sale de la misma geometría, así que no se desincroniza. */}
+        <section className="sec">
+          <h3>{L.hardwareH} <em className="mono">{L.hwN(hw.pieces)}</em></h3>
+          <div className="tblwrap">
+            <table className="cut hw">
+              <thead>
+                <tr><th>{L.thHw.item}</th><th className="r">{L.thHw.qty}</th><th>{L.thHw.unit}</th></tr>
+              </thead>
+              <tbody>
+                {byGroup(hw).map((s2) => (
+                  <Fragment key={s2.g}>
+                    <tr className="grp"><td colSpan={3}>{s2.title}</td></tr>
+                    {s2.lines.map((l, i) => (
+                      <tr key={i} title={l.note}>
+                        <td>{l.name}<small>{l.note}</small></td>
+                        <td className="r">{l.qty}</td><td>{l.unit}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <details className="hwnotes">
+            <summary>{L.hwNotes}</summary>
+            <ul>{hw.notes.map((x, i) => <li key={i}>{x}</li>)}</ul>
+          </details>
         </section>
 
         <section className="sec">

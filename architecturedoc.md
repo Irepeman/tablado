@@ -67,8 +67,9 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 
 | File | Lines | What it owns |
 | --- | ---: | --- |
-| `lib/model.js` | 752 | The engine: `normalize`, `build`, `validate`, presets, and the catalogue operations (`canPlace`, `applyItem`, `moveCell`, `addShelfInCell`, `splitColumn`) |
-| `lib/pricing.js` | 160 | `cutlist` (group identical panels), `nest` (lay them on sheets), `quote` (cost → price → margin) |
+| `lib/model.js` | 1,002 | The engine: `normalize`, `build`, `validate`, presets, and the catalogue operations (`canPlace`, `applyItem`, `moveCell`, `addShelfInCell`, `splitColumn`) |
+| `lib/pricing.js` | 150 | `cutlist` (group identical panels), `nest` (lay them on sheets), `quote` (cost → price → margin) |
+| `lib/hardware.js` | 279 | The ironmongery: every screw, cam fitting, hinge, runner, pin, bracket and plug the piece needs, where it goes, and the drilling it implies. The hardware cost in the quote is the sum of this list |
 | `lib/intent.js` | 1,360 | The Spanish chat engine: rules, not a language model |
 | `lib/intent-en.js` | 422 | English in, Spanish engine, English out |
 | `lib/photo.js` | 564 | Photo → furniture: homography, line detection, compartment classification |
@@ -77,7 +78,7 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 | `lib/judge.js` | 125 | The code judge: the four rules about an answer that a count can check, run on every `npm test` |
 | `components/Viewport.js` | 1,173 | three.js scene, picking, dragging, two-finger rotation, photo mode |
 | `components/Configurator.js` | 830 | Application state, history, chat wiring, catalogue placement |
-| `components/SpecRail.js` | 372 | Dimensions, material, columns, cut list, price, manufacturing check |
+| `components/SpecRail.js` | 567 | Dimensions, material, columns, cut list, hardware list, price, manufacturing check |
 | `components/decor.js` | 363 | Books, clothes, plants and a TV, for photo mode only. Never in the cut list |
 | `components/wood.js` | 313 | Procedural wood: grain at physical scale, per panel, with real edges |
 | `components/{Catalog,Chat,PhotoImport}.js` | 414 | Parts catalogue, chat panel, photo import dialog |
@@ -87,7 +88,7 @@ single tall wardrobe door is expressed. `railAt` holds the height of each hangin
 | `components/Reserve.js` | 96 | The reserve form: the gap's measurements, how they were taken, and one contact |
 | `app/api/design/route.js` | 163 | Optional server copilot. Returns parameters validated with zod, then normalized |
 
-Total application code: about 8,500 lines, plus 2,200 lines of tests.
+Total application code: about 8,800 lines, plus 2,400 lines of tests.
 
 ---
 
@@ -179,8 +180,18 @@ only moment the product asks for anything personal, and the only thing it stores
 - **Compartment rules.** A hanging rail needs 600 mm of clear height, an inner drawer 150 mm, a drawer
   front at least 110 mm, a drawer column at least 250 mm wide. Doors are at most two leaves, because a
   third leaf has no carcass edge to hinge on. Fronts are inset with a 3 mm gap, so nothing protrudes.
-- **Hardware.** Hinges per leaf height, runner pairs per drawer, handles per front, levelling feet,
-  wall anchor above 1.2 m, and the hanging rail priced as tube plus supports rather than as board.
+- **Hardware.** A cut list cannot be built: it is boards and nothing else. `lib/hardware.js` turns the
+  same geometry into what the workshop also has to buy, and it follows the trade's own conventions.
+  Cam fittings (Ø15, housed 12.5 mm) with a beech dowel per joint, two up to 400 mm of depth, three to
+  550, four beyond. Shelf pins and hinge plates hang off the System 32 grid: Ø5 mm holes every 32 mm,
+  the front row 37 mm from the edge. Hinges are Ø35 mm cups, by leaf height, and the arm has to be
+  **cranked**, because our fronts are inset and a straight arm will not close on them. Runners are the
+  commercial sizes that exist (ball bearing, 250–550 mm in 50 mm steps, ~30 kg) chosen by the depth of
+  **that drawer's box**, not of the piece. Below 250 mm there is no ball-bearing runner made, so the
+  drawer gets roller runners and the customer is told; below 200 mm nothing fits and `validate()` says
+  so instead of shipping a drawer that cannot be built. Then the rest: back panel fixings every 150 mm,
+  levelling feet, plinth screws, and a wall bracket or a pair of invisible hangers — above 1.2 m, or
+  wall-hung, that one is not a preference, it is the piece not falling on somebody.
 
 `validate()` turns all of this into the manufacturing check the customer sees, with a one-click fix
 where there is one.
@@ -190,8 +201,10 @@ where there is one.
 ## 6. Price
 
 Derived from the same parts, never estimated: board area at the material's sheet price, back panel,
-edge banding by metre, CNC cutting by metre plus a setup per sheet, hardware by count, packing per
-sheet, then markup, shipping and 21% VAT. Founder mode shows the breakdown and the real margin for
+CNC cutting by metre plus a setup per sheet, packing per sheet, then markup, shipping and 21% VAT.
+Hardware and edge banding are not counted twice or guessed: they are the sum of the ironmongery list
+in `lib/hardware.js`, the same list the workshop receives, so a fitting that appears on the sheet is
+a fitting that was paid for. Founder mode shows the breakdown and the real margin for
 that exact design.
 
 | Preset | Size (mm) | Pieces | Sheets | Price incl. VAT | Margin |
@@ -210,11 +223,11 @@ least certain part of the product.
 
 ## 7. Tests
 
-`npm test` runs eleven files and takes about two seconds.
+`npm test` runs twelve files and takes about two seconds.
 
 | File | What it proves |
 | --- | --- |
-| `tests/qa.mjs` | 872,897 checks: nothing overlaps, nothing escapes the carcass, every piece fits a sheet, the cut list is complete, `normalize` is idempotent |
+| `tests/qa.mjs` | 873,028 checks: nothing overlaps, nothing escapes the carcass, every piece fits a sheet, the cut list is complete, `normalize` is idempotent |
 | `tests/catalog.mjs` | 5,706 random catalogue operations: the part lands where it was dropped, other columns do not change |
 | `tests/photo.mjs` | 40 synthetic photos, including perspective and visible side panels |
 | `tests/chat.mjs` · `chat-en.mjs` | 329 phrases written the way customers write them |
@@ -223,6 +236,7 @@ least certain part of the product.
 | `tests/audit.mjs` | 178 pieces end to end: no NaN, nothing outside the carcass, every price and cutting plan a real number |
 | `tests/evals.mjs` | The 15 cases of the session 8 error analysis: 10 real requests and 5 attacks, plus the three understanding bugs they exposed |
 | `tests/judge.mjs` | 19 judged cases: the fifteen of the session-8 error analysis as the product answers them today, plus four answers it really gave on 3 November. Checks that every case has a verdict and a reusable reason, that no answer today breaks a code rule, and that the four old ones break exactly the rules we said |
+| `tests/hardware.mjs` | 76 pieces: every door has hinges and a tall leaf has more than two, every drawer has a runner pair that actually fits its box and is a size that is sold, every shelf has four pins, a piece over 1.2 m or wall-hung never leaves without a wall fixing, the hardware cost in the quote equals the list, and the list follows the piece — remove a shelf and its four pins go with it |
 | `tests/learn.mjs` | 41 checks on the learning loop, most of them on its limit: that a number, a sentence or an instruction cannot be learned, and that a word is only saved if it fixes the phrase that failed |
 
 The suite is the gate: if anything fails, nothing is deployed. It is also what made parallel AI review
@@ -337,6 +351,9 @@ a pre-order or nothing at all.
 | 4 Nov | The product can learn one word at a time, approved by a person | Our own probe found real Spanish words the engine did not know — `entrepaño`, `anaquel`, `gaveta`. Those are vocabulary, not design, and vocabulary is the only thing it is safe to learn |
 | 4 Nov | An undo within twenty seconds of a chat change is recorded as a rejection | It is the only signal for the failure found on 3 November: understanding something else and doing it with complete confidence. Nobody writes to complain about that one |
 | 4 Nov | A learned entry can never be a number, a sentence or a rule | If the loop could learn a rule, enough customers asking for a 2.4 m unsupported shelf would eventually get one. The limit is in `isWord`, not in our good intentions |
+| 20 Nov | The plans now carry the ironmongery: `lib/hardware.js` | A cut list is boards. A carpenter who opens it cannot assemble anything without knowing which cam fitting, which hinge, which runner and which screw, and where the holes go. It comes from the same geometry, so it cannot drift from the piece |
+| 20 Nov | The runner is chosen by the drawer box's depth, not the piece's | Writing the list found a real defect: at 320 mm deep the box comes out 242 mm, and the shortest ball-bearing runner sold is 250. The product was quietly specifying a runner nobody sells. Now it specifies rollers and says why, and under 200 mm it refuses |
+| 20 Nov | The code judge caught our own new warning | The first wording said "242 mm de fondo" about the box while the piece was 320 mm deep, and `sin-contradecir` failed it. The warning was reworded to name both measurements. The rule was right and we were the ones who had to change |
 | 14 Nov | The chat's reply moved out of the component into `lib/answer.js` | It only existed in a browser, so it could not be tested or judged. Now the product and the test bench say the same words |
 | 14 Nov | Four of the five rules for a good answer are code, not prompt | They can be checked with a count, so they should cost nothing and never have a bad day. Only the two that need reading go to the AI judge |
 | 14 Nov | The eval set keeps four answers from before the fixes, verbatim | A judge tested only on answers that pass proves nothing. The four failures of 3 November are the only real ones we have |

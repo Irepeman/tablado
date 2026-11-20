@@ -116,7 +116,15 @@ function invariants(p, tag) {
   check(Number.isFinite(q.gross) && q.gross > q.net && q.net > q.cost && q.cost > 0, "presupuesto", `${tag}: importes incoherentes`);
   check(q.margin > 0.4 && q.margin < 0.7, "presupuesto", `${tag}: margen ${(q.margin * 100).toFixed(1)} %`);
   const drawers = p.columns.reduce((a, c) => a + c.drawers, 0);
-  check(q.hw.runners === drawers, "presupuesto", `${tag}: ${drawers} cajones pero ${q.hw.runners} pares de guías`);
+  /* todo cajón lleva guías, salvo los que no admiten ninguna porque la caja es
+     más corta que la guía más corta que existe: esos se cuentan aparte y
+     validate() tiene que avisar de ellos */
+  check(q.hw.runners + q.hw.noRunner === drawers, "presupuesto", `${tag}: ${drawers} cajones pero ${q.hw.runners} pares de guías`);
+  if (q.hw.noRunner) {
+    const avisos = validate(p, geo, "es");
+    check(avisos.some((x) => x.lvl === "warn" && /guía|cajones/i.test(x.t)), "presupuesto",
+          `${tag}: ${q.hw.noRunner} cajones sin guía posible y ningún aviso`);
+  }
   const boxPieces = geo.parts.filter((x) => x.grp === "cajon").reduce((a, x) => a + (x.qty || 1), 0);
   const fronts = geo.parts.filter((x) => x.grp === "frente" && !x.nohandle).length;
   check(q.hw.handles === fronts, "presupuesto", `${tag}: ${fronts} frentes pero ${q.hw.handles} tiradores`);
